@@ -1,11 +1,13 @@
 import { Router } from 'express';
 import fs from 'fs';
 import path from 'path';
-import { nodeData, createSubscription, listSubscriptions, deleteSubscriptionById, updateSubscriptionById, findSubscriptionByToken, getPrivateKey, setPrivateKey } from '../lib/fanvpn.js';
+import { nodeData, createSubscription, listSubscriptions, deleteSubscriptionById, updateSubscriptionById, findSubscriptionByToken, getPrivateKey, setPrivateKey, initFromDB, saveSetting } from '../lib/fanvpn.js';
 
 const router = Router();
 
 const PWD_FILE = path.join(process.cwd(), 'admin_password.txt');
+const TITLE_FILE = path.join(process.cwd(), 'site_title.txt');
+const DEFAULT_TITLE = 'Q3075554556';
 
 function loadAdminPassword(): string {
   try {
@@ -21,14 +23,10 @@ function saveAdminPassword(pwd: string): void {
   try {
     fs.writeFileSync(PWD_FILE, pwd, 'utf8');
   } catch (e) {
-    console.error('⚠️ 管理员密码持久化写入失败:', e);
+    console.error('⚠️ 管理员密码文件写入失败:', e);
   }
+  saveSetting('adminPassword', pwd).catch(console.error);
 }
-
-let adminPassword = loadAdminPassword();
-
-const TITLE_FILE = path.join(process.cwd(), 'site_title.txt');
-const DEFAULT_TITLE = 'Q3075554556';
 
 function loadSiteTitle(): string {
   try {
@@ -44,11 +42,18 @@ function persistSiteTitle(title: string): void {
   try {
     fs.writeFileSync(TITLE_FILE, title, 'utf8');
   } catch (e) {
-    console.error('⚠️ 标题持久化写入失败:', e);
+    console.error('⚠️ 标题文件写入失败:', e);
   }
+  saveSetting('siteTitle', title).catch(console.error);
 }
 
+let adminPassword = loadAdminPassword();
 let siteTitle = loadSiteTitle();
+
+initFromDB().then(({ adminPassword: dbPwd, siteTitle: dbTitle }) => {
+  if (dbPwd) adminPassword = dbPwd;
+  if (dbTitle) siteTitle = dbTitle;
+}).catch(console.error);
 
 const DASHBOARD_HTML = `<!DOCTYPE html>
 <html lang="zh">

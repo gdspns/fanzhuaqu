@@ -1,6 +1,8 @@
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
+import { db, subscriptions, settings } from '@workspace/db';
+import { eq } from 'drizzle-orm';
 
 const DEFAULT_PRIVATE_KEY = `-----BEGIN PRIVATE KEY-----
 MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQCUHMdMJFSzOnuO
@@ -33,20 +35,17 @@ zygLJrETnjWa1iAMPLnIB9lB
 
 const KEY_FILE = path.join(process.cwd(), 'private_key.pem');
 
-function loadKey(): string {
+function loadKeyFromFile(): string {
   try {
     if (fs.existsSync(KEY_FILE)) {
       const saved = fs.readFileSync(KEY_FILE, 'utf8').trim();
-      if (saved.startsWith('-----BEGIN')) {
-        console.log('✅ 已从持久化文件加载自定义私钥');
-        return saved;
-      }
+      if (saved.startsWith('-----BEGIN')) return saved;
     }
-  } catch { /* 读取失败则使用内置密钥 */ }
+  } catch { /* fall through */ }
   return DEFAULT_PRIVATE_KEY;
 }
 
-let currentPrivateKey = loadKey();
+let currentPrivateKey = loadKeyFromFile();
 
 const API_URLS = [
   'https://www.githubip.xyz/config.json',
@@ -90,6 +89,82 @@ function generateId(): string {
   return Math.random().toString(36).substring(2, 10) + Math.random().toString(36).substring(2, 8);
 }
 
+async function dbUpsertSetting(key: string, value: string): Promise<void> {
+  if (!db) return;
+  try {
+    await db.insert(settings).values({ key, value })
+      .onConflictDoUpdate({ target: settings.key, set: { value } });
+  } catch (e) {
+    console.error('⚠️ DB 设置写入失败:', e);
+  }
+}
+
+async function dbUpsertSubscription(sub: Subscription): Promise<void> {
+  if (!db) return;
+  try {
+    await db.insert(subscriptions).values(sub)
+      .onConflictDoUpdate({
+        target: subscriptions.id,
+        set: { name: sub.name, token: sub.token, expireAt: sub.expireAt }
+      });
+  } catch (e) {
+    console.error('⚠️ DB 订阅写入失败:', e);
+  }
+}
+
+async function dbDeleteSubscription(id: string): Promise<void> {
+  if (!db) return;
+  try {
+    await db.delete(subscriptions).where(eq(subscriptions.id, id));
+  } catch (e) {
+    console.error('⚠️ DB 订阅删除失败:', e);
+  }
+}
+
+export async function saveSetting(key: string, value: string): Promise<void> {
+  await dbUpsertSetting(key, value);
+}
+
+export async function initFromDB(): Promise<{ adminPassword?: string; siteTitle?: string }> {
+  if (!db) {
+    console.log('ℹ️ 未配置 DATABASE_URL，使用本地文件存储');
+    return {};
+  }
+  try {
+    const [allSubs, allSettings] = await Promise.all([
+      db.select().from(subscriptions),
+      db.select().from(settings),
+    ]);
+
+    for (const sub of allSubs) {
+      subscriptionStore.set(sub.token, {
+        id: sub.id,
+        name: sub.name,
+        token: sub.token,
+        expireAt: sub.expireAt,
+        createdAt: sub.createdAt,
+      });
+    }
+    console.log(`✅ 从数据库加载了 ${allSubs.length} 条订阅`);
+
+    const settingsMap: Record<string, string> = {};
+    for (const s of allSettings) settingsMap[s.key] = s.value;
+
+    if (settingsMap['privateKey']) {
+      currentPrivateKey = settingsMap['privateKey'];
+      console.log('✅ 从数据库加载了自定义私钥');
+    }
+
+    return {
+      adminPassword: settingsMap['adminPassword'],
+      siteTitle: settingsMap['siteTitle'],
+    };
+  } catch (e) {
+    console.error('⚠️ 从数据库加载数据失败，回退到本地文件:', e);
+    return {};
+  }
+}
+
 export function createSubscription(name: string, days: number): Subscription {
   const sub: Subscription = {
     id: generateId(),
@@ -99,6 +174,7 @@ export function createSubscription(name: string, days: number): Subscription {
     createdAt: Date.now()
   };
   subscriptionStore.set(sub.token, sub);
+  dbUpsertSubscription(sub).catch(console.error);
   return sub;
 }
 
@@ -112,6 +188,7 @@ export function updateSubscriptionById(id: string, updates: { name?: string; exp
       if (updates.name) sub.name = updates.name;
       if (updates.expireAt) sub.expireAt = updates.expireAt;
       subscriptionStore.set(token, sub);
+      dbUpsertSubscription(sub).catch(console.error);
       return sub;
     }
   }
@@ -122,6 +199,7 @@ export function deleteSubscriptionById(id: string): boolean {
   for (const [token, sub] of subscriptionStore.entries()) {
     if (sub.id === id) {
       subscriptionStore.delete(token);
+      dbDeleteSubscription(id).catch(console.error);
       return true;
     }
   }
@@ -194,6 +272,7 @@ export function setPrivateKey(pem: string): void {
   } catch (e) {
     console.error('⚠️ 私钥持久化写入失败:', e);
   }
+  dbUpsertSetting('privateKey', currentPrivateKey).catch(console.error);
 }
 
 export function startNodeScheduler(): void {
