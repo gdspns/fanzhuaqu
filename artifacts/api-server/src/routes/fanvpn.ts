@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import fs from 'fs';
 import path from 'path';
-import { nodeData, createSubscription, listSubscriptions, deleteSubscriptionById, updateSubscriptionById, findSubscriptionByToken, getPrivateKey, setPrivateKey, initFromDB, saveSetting } from '../lib/fanvpn.js';
+import { nodeData, createSubscription, listSubscriptions, deleteSubscriptionById, updateSubscriptionById, findSubscriptionByToken, getPrivateKey, setPrivateKey, initFromDB, saveSetting, checkAndRegisterDevice, getDeviceCountBatch, listDevices, clearDevices } from '../lib/fanvpn.js';
 
 const router = Router();
 
@@ -49,10 +49,12 @@ function persistSiteTitle(title: string): void {
 
 let adminPassword = loadAdminPassword();
 let siteTitle = loadSiteTitle();
+let maxDevicesGlobal = 0;
 
-initFromDB().then(({ adminPassword: dbPwd, siteTitle: dbTitle }) => {
+initFromDB().then(({ adminPassword: dbPwd, siteTitle: dbTitle, maxDevicesGlobal: dbMaxDev }) => {
   if (dbPwd) adminPassword = dbPwd;
   if (dbTitle) siteTitle = dbTitle;
+  if (dbMaxDev !== undefined) maxDevicesGlobal = dbMaxDev;
 }).catch(console.error);
 
 const DASHBOARD_HTML = `<!DOCTYPE html>
@@ -170,6 +172,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
                 <th class="p-4 font-medium">Token标识</th>
                 <th class="p-4 font-medium">到期时间</th>
                 <th class="p-4 font-medium">状态</th>
+                <th class="p-4 font-medium">设备</th>
                 <th class="p-4 font-medium text-right">操作</th>
               </tr>
             </thead>
@@ -197,6 +200,15 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
 
     <!-- 修改管理员密码 Tab -->
     <div id="view-pwd" class="space-y-4 hidden">
+      <div class="bg-card p-6 rounded-2xl max-w-md">
+        <h2 class="text-xl font-semibold mb-1">📱 全局设备数量上限</h2>
+        <p class="text-sm text-gray-400 mb-4">设置每个订阅链接最多允许的设备数。0 表示不限制。单个订阅设置的设备数不能超过此全局上限。</p>
+        <div class="flex items-center gap-3">
+          <input type="number" id="global-max-devices" min="0" max="100" placeholder="0 = 不限制" class="flex-1 bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-cyan-400 focus:outline-none focus:border-cyan-500">
+          <button onclick="saveGlobalMaxDevices()" class="px-5 py-2 rounded-lg bg-violet-500 hover:bg-violet-400 text-white font-bold transition-colors">保存</button>
+        </div>
+        <p class="text-xs text-emerald-400/70 mt-3">✅ 超过设备数的订阅用户无法更新节点，有效防止转卖。</p>
+      </div>
       <div class="bg-card p-6 rounded-2xl max-w-md">
         <h2 class="text-xl font-semibold mb-1">✏️ 修改页面标题</h2>
         <p class="text-sm text-gray-400 mb-4">修改后台页面显示的标题名称，保存后持久化，重启服务器也不丢失。</p>
@@ -252,6 +264,11 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
             <button onclick="setQuickDate(365)" class="quick-btn flex-1 border border-gray-700 bg-gray-900 rounded-lg py-1.5 text-xs hover:border-cyan-500 hover:text-cyan-400 transition-colors">+1年</button>
           </div>
         </div>
+        <div>
+          <label class="block text-sm text-gray-400 mb-1">设备数量限制 <span class="text-gray-600 text-xs">(0 = 不限制)</span></label>
+          <input type="number" id="sub-max-devices" min="0" max="100" value="0" class="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-cyan-400 focus:outline-none focus:border-cyan-500">
+          <p id="sub-max-devices-hint" class="text-xs text-gray-600 mt-1"></p>
+        </div>
         <div class="pt-4 flex gap-3">
           <button onclick="closeModal()" class="flex-1 py-2.5 rounded-lg border border-gray-700 text-gray-400 hover:bg-gray-800 transition-colors">取消</button>
           <button onclick="createSub()" class="flex-1 py-2.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-gray-900 font-bold transition-colors">立即生成</button>
@@ -283,6 +300,10 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
             <button onclick="setEditQuickDate(365)" class="flex-1 border border-gray-700 bg-gray-900 rounded-lg py-1.5 text-xs hover:border-cyan-500 hover:text-cyan-400 transition-colors">+1年</button>
           </div>
         </div>
+        <div>
+          <label class="block text-sm text-gray-400 mb-1">设备数量限制 <span class="text-gray-600 text-xs">(0 = 不限制)</span></label>
+          <input type="number" id="edit-max-devices" min="0" max="100" value="0" class="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-cyan-400 focus:outline-none focus:border-cyan-500">
+        </div>
         <div class="pt-2 flex gap-3">
           <button onclick="closeEditModal()" class="flex-1 py-2.5 rounded-lg border border-gray-700 text-gray-400 hover:bg-gray-800 transition-colors">取消</button>
           <button onclick="saveEdit()" class="flex-1 py-2.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-gray-900 font-bold transition-colors">保存修改</button>
@@ -290,6 +311,24 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       </div>
     </div>
   </div>
+
+  <!-- 设备列表弹窗 -->
+  <div id="devices-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center hidden opacity-0 transition-opacity">
+    <div class="bg-card p-6 rounded-2xl border border-gray-700 shadow-2xl w-full max-w-md transform scale-95 transition-transform" id="devices-modal-box">
+      <div class="flex justify-between items-center mb-4">
+        <h3 class="text-lg font-bold text-white">📱 已注册设备</h3>
+        <button onclick="closeDevicesModal()" class="text-gray-500 hover:text-white text-xl">&times;</button>
+      </div>
+      <p class="text-xs text-gray-500 mb-3">以下 IP 地址已接入该订阅。清除后设备需重新注册。</p>
+      <div id="devices-list" class="space-y-2 max-h-64 overflow-y-auto mb-4"></div>
+      <div class="flex gap-3">
+        <button onclick="closeDevicesModal()" class="flex-1 py-2 rounded-lg border border-gray-700 text-gray-400 hover:bg-gray-800 transition-colors text-sm">关闭</button>
+        <button onclick="doClearDevices()" class="flex-1 py-2 rounded-lg bg-rose-500 hover:bg-rose-400 text-white font-bold transition-colors text-sm">清除所有设备</button>
+      </div>
+    </div>
+  </div>
+  <input type="hidden" id="devices-current-token">
+  <input type="hidden" id="devices-current-id">
 
   <!-- 通知 -->
   <div id="toast" class="fixed top-5 left-1/2 -translate-x-1/2 bg-emerald-500 text-gray-900 px-6 py-3 rounded-full font-bold shadow-lg transform -translate-y-20 opacity-0 transition-all z-[100]">操作成功！</div>
@@ -375,6 +414,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       if (tab === 'nodes') initDashboard();
       else if (tab === 'subs') renderSubs();
       else if (tab === 'keys') loadKey();
+      else if (tab === 'pwd') loadGlobalMaxDevices();
     }
 
     // ===== 订阅管理（全部走服务端 API）=====
@@ -393,6 +433,12 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
             const statusBadge = isExpired
               ? '<span class="px-2 py-1 rounded bg-rose-500/10 text-rose-400 text-xs border border-rose-500/20">已过期</span>'
               : '<span class="px-2 py-1 rounded bg-emerald-500/10 text-emerald-400 text-xs border border-emerald-500/20">正常</span>';
+            const maxDev = sub.maxDevices > 0 ? sub.maxDevices : '∞';
+            const devCount = sub.deviceCount || 0;
+            const devOver = sub.maxDevices > 0 && devCount >= sub.maxDevices;
+            const deviceBadge = devOver
+              ? \`<span class="px-2 py-1 rounded bg-rose-500/10 text-rose-400 text-xs border border-rose-500/20">\${devCount}/\${maxDev}</span>\`
+              : \`<span class="px-2 py-1 rounded bg-gray-700/50 text-gray-400 text-xs">\${devCount}/\${maxDev}</span>\`;
             const row = document.createElement('tr');
             row.className = 'hover:bg-gray-800/30 transition-colors';
             row.innerHTML = \`
@@ -400,9 +446,11 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
               <td class="p-4 font-mono text-cyan-600/80 text-xs select-all">\${sub.token}</td>
               <td class="p-4 text-gray-400 text-xs">\${expireDate}</td>
               <td class="p-4">\${statusBadge}</td>
+              <td class="p-4">\${deviceBadge}</td>
               <td class="p-4 text-right space-x-2">
                 <button onclick="copySubUrl('\${sub.token}', 'clash')" class="text-xs bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 px-3 py-1.5 rounded transition-colors \${isExpired ? 'opacity-50 cursor-not-allowed' : ''}" \${isExpired ? 'disabled' : ''}>复制 Clash</button>
-                <button onclick="openEditModal('\${sub.id}', '\${sub.name.replace(/'/g, '&#39;')}', \${sub.expireAt})" class="text-xs bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 px-3 py-1.5 rounded transition-colors">编辑</button>
+                <button onclick="viewDevices('\${sub.id}', '\${sub.token}')" class="text-xs bg-violet-500/10 hover:bg-violet-500/20 text-violet-400 px-3 py-1.5 rounded transition-colors">设备</button>
+                <button onclick="openEditModal('\${sub.id}', '\${sub.name.replace(/'/g, '&#39;')}', \${sub.expireAt}, \${sub.maxDevices})" class="text-xs bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 px-3 py-1.5 rounded transition-colors">编辑</button>
                 <button onclick="deleteSub('\${sub.id}')" class="text-xs bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 px-3 py-1.5 rounded transition-colors">删除</button>
               </td>\`;
             list.appendChild(row);
@@ -424,6 +472,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
 
     function openModal() {
       document.getElementById('sub-name').value = '';
+      document.getElementById('sub-max-devices').value = '0';
       setQuickDate(30);
       document.getElementById('add-modal').classList.remove('hidden');
       setTimeout(() => {
@@ -435,6 +484,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     function createSub() {
       const name = document.getElementById('sub-name').value.trim();
       const dateVal = document.getElementById('sub-expire-date').value;
+      const maxDevices = parseInt(document.getElementById('sub-max-devices').value) || 0;
       if (!name) { showToast('请输入备注名称', true); return; }
       if (!dateVal) { showToast('请选择到期日期', true); return; }
       const expireAt = new Date(dateVal + 'T23:59:59').getTime();
@@ -442,7 +492,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       fetch('/api/subs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, expireAt })
+        body: JSON.stringify({ name, expireAt, maxDevices })
       })
         .then(r => r.json())
         .then(() => {
@@ -515,9 +565,10 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     }
 
     // ===== 编辑订阅 =====
-    function openEditModal(id, name, expireAt) {
+    function openEditModal(id, name, expireAt, maxDevices) {
       document.getElementById('edit-sub-id').value = id;
       document.getElementById('edit-sub-name').value = name;
+      document.getElementById('edit-max-devices').value = maxDevices || 0;
       const d = new Date(expireAt);
       document.getElementById('edit-expire-date').value = d.toISOString().slice(0, 10);
       document.getElementById('edit-modal').classList.remove('hidden');
@@ -543,13 +594,14 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       const id = document.getElementById('edit-sub-id').value;
       const name = document.getElementById('edit-sub-name').value.trim();
       const dateVal = document.getElementById('edit-expire-date').value;
+      const maxDevices = parseInt(document.getElementById('edit-max-devices').value) || 0;
       if (!name) { showToast('备注名称不能为空', true); return; }
       if (!dateVal) { showToast('请选择到期日期', true); return; }
       const expireAt = new Date(dateVal + 'T23:59:59').getTime();
       fetch('/api/subs/' + id, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, expireAt })
+        body: JSON.stringify({ name, expireAt, maxDevices })
       }).then(r => r.json()).then(d => {
         if (d.id || d.ok) {
           renderSubs();
@@ -606,9 +658,88 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
         }
       }).catch(() => showToast('修改失败', true));
     }
+
+    // ===== 全局设备数量限制 =====
+    function loadGlobalMaxDevices() {
+      fetch('/api/admin/maxDevices', { headers: { 'X-Admin-Password': sessionPwd } })
+        .then(r => r.json())
+        .then(d => { document.getElementById('global-max-devices').value = d.maxDevices; })
+        .catch(() => {});
+    }
+
+    function saveGlobalMaxDevices() {
+      const val = parseInt(document.getElementById('global-max-devices').value) || 0;
+      fetch('/api/admin/maxDevices', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'X-Admin-Password': sessionPwd },
+        body: JSON.stringify({ maxDevices: val })
+      }).then(r => r.json()).then(d => {
+        if (d.ok) showToast('📱 全局设备上限已保存！');
+        else showToast(d.error || '保存失败', true);
+      }).catch(() => showToast('保存失败', true));
+    }
+
+    // ===== 设备管理 =====
+    function viewDevices(id, token) {
+      document.getElementById('devices-current-id').value = id;
+      document.getElementById('devices-current-token').value = token;
+      const list = document.getElementById('devices-list');
+      list.innerHTML = '<div class="text-gray-500 text-sm text-center py-4">加载中...</div>';
+      document.getElementById('devices-modal').classList.remove('hidden');
+      setTimeout(() => {
+        document.getElementById('devices-modal').classList.remove('opacity-0');
+        document.getElementById('devices-modal-box').classList.remove('scale-95');
+      }, 10);
+      fetch('/api/subs/' + id + '/devices', { headers: { 'X-Admin-Password': sessionPwd } })
+        .then(r => r.json())
+        .then(devices => {
+          if (devices.length === 0) {
+            list.innerHTML = '<div class="text-gray-500 text-sm text-center py-4">暂无设备接入记录</div>';
+            return;
+          }
+          list.innerHTML = devices.map(function(d) {
+            const date = new Date(d.firstSeen).toLocaleString('zh-CN');
+            return '<div class="flex items-center justify-between bg-gray-900 rounded-lg px-3 py-2 gap-4">' +
+              '<span class="font-mono text-cyan-400 text-sm">' + d.ip + '</span>' +
+              '<span class="text-gray-500 text-xs whitespace-nowrap">' + date + '</span>' +
+              '</div>';
+          }).join('');
+        })
+        .catch(() => { list.innerHTML = '<div class="text-rose-400 text-sm text-center py-4">加载失败</div>'; });
+    }
+
+    function closeDevicesModal() {
+      document.getElementById('devices-modal').classList.add('opacity-0');
+      document.getElementById('devices-modal-box').classList.add('scale-95');
+      setTimeout(() => document.getElementById('devices-modal').classList.add('hidden'), 300);
+    }
+
+    function doClearDevices() {
+      const id = document.getElementById('devices-current-id').value;
+      if (!confirm('确定要清除该订阅的所有设备记录吗？清除后用户需重新接入。')) return;
+      fetch('/api/subs/' + id + '/devices', {
+        method: 'DELETE',
+        headers: { 'X-Admin-Password': sessionPwd }
+      }).then(r => r.json()).then(d => {
+        if (d.ok) {
+          closeDevicesModal();
+          renderSubs();
+          showToast('✅ 已清除所有设备记录！');
+        } else {
+          showToast(d.error || '清除失败', true);
+        }
+      }).catch(() => showToast('清除失败', true));
+    }
   </script>
 </body>
 </html>`;
+
+// ===== 工具: 获取真实客户端IP =====
+function getClientIp(req: import('express').Request): string {
+  const fwd = req.headers['x-forwarded-for'];
+  if (fwd) return (Array.isArray(fwd) ? fwd[0] : fwd).split(',')[0].trim();
+  return req.ip || req.socket?.remoteAddress || 'unknown';
+}
 
 // ===== 鉴权中间件 =====
 function requireAdmin(req: import('express').Request, res: import('express').Response, next: import('express').NextFunction) {
@@ -671,31 +802,45 @@ router.get('/status', (_req, res) => {
 });
 
 // ===== API: 订阅管理 CRUD =====
-router.get('/subs', (_req, res) => {
-  res.json(listSubscriptions());
+router.get('/subs', async (_req, res) => {
+  const subs = listSubscriptions();
+  const tokens = subs.map(s => s.token);
+  const countMap = await getDeviceCountBatch(tokens);
+  res.json(subs.map(s => ({ ...s, deviceCount: countMap[s.token] ?? 0 })));
 });
 
 router.post('/subs', (req, res) => {
-  const { name, expireAt } = req.body as { name?: string; expireAt?: number };
+  const { name, expireAt, maxDevices } = req.body as { name?: string; expireAt?: number; maxDevices?: number };
   if (!name || typeof name !== 'string' || !expireAt || typeof expireAt !== 'number') {
     return res.status(400).json({ error: '参数错误' });
   }
   if (expireAt <= Date.now()) {
     return res.status(400).json({ error: '到期时间必须是未来的时间' });
   }
+  let resolvedMax = typeof maxDevices === 'number' && maxDevices >= 0 ? Math.floor(maxDevices) : 0;
+  if (maxDevicesGlobal > 0 && (resolvedMax === 0 || resolvedMax > maxDevicesGlobal)) {
+    resolvedMax = maxDevicesGlobal;
+  }
   const daysRemaining = Math.ceil((expireAt - Date.now()) / (1000 * 60 * 60 * 24));
-  const sub = createSubscription(name.trim(), daysRemaining);
+  const sub = createSubscription(name.trim(), daysRemaining, resolvedMax);
   res.status(201).json(sub);
 });
 
 router.put('/subs/:id', (req, res) => {
-  const { name, expireAt } = req.body as { name?: string; expireAt?: number };
-  if (!name && !expireAt) return res.status(400).json({ error: '参数错误' });
-  const updates: { name?: string; expireAt?: number } = {};
+  const { name, expireAt, maxDevices } = req.body as { name?: string; expireAt?: number; maxDevices?: number };
+  if (!name && !expireAt && maxDevices === undefined) return res.status(400).json({ error: '参数错误' });
+  const updates: { name?: string; expireAt?: number; maxDevices?: number } = {};
   if (name && typeof name === 'string') updates.name = name.trim();
   if (expireAt && typeof expireAt === 'number') {
     if (expireAt <= Date.now()) return res.status(400).json({ error: '到期时间必须是未来的时间' });
     updates.expireAt = expireAt;
+  }
+  if (typeof maxDevices === 'number' && maxDevices >= 0) {
+    let resolvedMax = Math.floor(maxDevices);
+    if (maxDevicesGlobal > 0 && (resolvedMax === 0 || resolvedMax > maxDevicesGlobal)) {
+      resolvedMax = maxDevicesGlobal;
+    }
+    updates.maxDevices = resolvedMax;
   }
   const updated = updateSubscriptionById(req.params.id, updates);
   if (updated) res.json(updated);
@@ -737,11 +882,17 @@ router.get('/sub/clash', (req, res) => {
   res.send(buildClashYaml());
 });
 
-router.get('/sub/clash/:token', (req, res) => {
+router.get('/sub/clash/:token', async (req, res) => {
   const sub = findSubscriptionByToken(req.params.token);
   if (!sub) return res.status(404).send('订阅不存在');
   if (Date.now() > sub.expireAt) return res.status(403).send('订阅已过期');
   if (nodeData.nodes.length === 0) return res.status(503).send('节点未准备好，请稍后再试');
+
+  if (sub.maxDevices > 0) {
+    const ip = getClientIp(req);
+    const { allowed } = await checkAndRegisterDevice(sub.token, ip, sub.maxDevices);
+    if (!allowed) return res.status(403).send(`设备数已达上限 (${sub.maxDevices})，如需更换设备请联系管理员`);
+  }
 
   const expireSeconds = Math.floor(sub.expireAt / 1000);
   res.setHeader('Content-Type', 'text/yaml; charset=utf-8');
@@ -757,11 +908,18 @@ router.get('/sub/base64', (req, res) => {
   res.send(buildBase64());
 });
 
-router.get('/sub/base64/:token', (req, res) => {
+router.get('/sub/base64/:token', async (req, res) => {
   const sub = findSubscriptionByToken(req.params.token);
   if (!sub) return res.status(404).send('订阅不存在');
   if (Date.now() > sub.expireAt) return res.status(403).send('订阅已过期');
   if (nodeData.nodes.length === 0) return res.status(503).send('节点未准备好');
+
+  if (sub.maxDevices > 0) {
+    const ip = getClientIp(req);
+    const { allowed } = await checkAndRegisterDevice(sub.token, ip, sub.maxDevices);
+    if (!allowed) return res.status(403).send(`设备数已达上限 (${sub.maxDevices})，如需更换设备请联系管理员`);
+  }
+
   res.setHeader('Content-Type', 'text/plain; charset=utf-8');
   res.send(buildBase64());
 });
@@ -770,6 +928,38 @@ router.get('/sub/base64/:token', (req, res) => {
 router.get('/dashboard', (_req, res) => {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.send(DASHBOARD_HTML);
+});
+
+// ===== API: 全局设备数量上限 =====
+router.get('/admin/maxDevices', requireAdmin, (_req, res) => {
+  res.json({ maxDevices: maxDevicesGlobal });
+});
+
+router.put('/admin/maxDevices', requireAdmin, (req, res) => {
+  const { maxDevices } = req.body as { maxDevices?: number };
+  if (typeof maxDevices !== 'number' || maxDevices < 0) {
+    return res.status(400).json({ error: '参数错误，必须为非负整数' });
+  }
+  maxDevicesGlobal = Math.floor(maxDevices);
+  saveSetting('maxDevicesGlobal', String(maxDevicesGlobal)).catch(console.error);
+  res.json({ ok: true, maxDevices: maxDevicesGlobal });
+});
+
+// ===== API: 设备管理 =====
+router.get('/subs/:id/devices', requireAdmin, async (req, res) => {
+  const subs = listSubscriptions();
+  const sub = subs.find(s => s.id === req.params.id);
+  if (!sub) return res.status(404).json({ error: '订阅不存在' });
+  const devices = await listDevices(sub.token);
+  res.json(devices);
+});
+
+router.delete('/subs/:id/devices', requireAdmin, async (req, res) => {
+  const subs = listSubscriptions();
+  const sub = subs.find(s => s.id === req.params.id);
+  if (!sub) return res.status(404).json({ error: '订阅不存在' });
+  await clearDevices(sub.token);
+  res.json({ ok: true });
 });
 
 // ===== 工具函数 =====

@@ -1,8 +1,8 @@
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
-import { db, subscriptions, settings } from '@workspace/db';
-import { eq } from 'drizzle-orm';
+import { db, subscriptions, subscriptionDevices, settings } from '@workspace/db';
+import { eq, and, count } from 'drizzle-orm';
 
 const DEFAULT_PRIVATE_KEY = `-----BEGIN PRIVATE KEY-----
 MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQCUHMdMJFSzOnuO
@@ -65,6 +65,12 @@ export interface Subscription {
   token: string;
   expireAt: number;
   createdAt: number;
+  maxDevices: number;
+}
+
+export interface DeviceInfo {
+  ip: string;
+  firstSeen: number;
 }
 
 interface Envelope {
@@ -102,11 +108,17 @@ async function dbUpsertSetting(key: string, value: string): Promise<void> {
 async function dbUpsertSubscription(sub: Subscription): Promise<void> {
   if (!db) return;
   try {
-    await db.insert(subscriptions).values(sub)
-      .onConflictDoUpdate({
-        target: subscriptions.id,
-        set: { name: sub.name, token: sub.token, expireAt: sub.expireAt }
-      });
+    await db.insert(subscriptions).values({
+      id: sub.id,
+      name: sub.name,
+      token: sub.token,
+      expireAt: sub.expireAt,
+      createdAt: sub.createdAt,
+      maxDevices: sub.maxDevices,
+    }).onConflictDoUpdate({
+      target: subscriptions.id,
+      set: { name: sub.name, token: sub.token, expireAt: sub.expireAt, maxDevices: sub.maxDevices }
+    });
   } catch (e) {
     console.error('⚠️ DB 订阅写入失败:', e);
   }
@@ -116,6 +128,8 @@ async function dbDeleteSubscription(id: string): Promise<void> {
   if (!db) return;
   try {
     await db.delete(subscriptions).where(eq(subscriptions.id, id));
+    const sub = Array.from(subscriptionStore.values()).find(s => s.id === id);
+    if (sub) await db.delete(subscriptionDevices).where(eq(subscriptionDevices.token, sub.token));
   } catch (e) {
     console.error('⚠️ DB 订阅删除失败:', e);
   }
@@ -125,7 +139,7 @@ export async function saveSetting(key: string, value: string): Promise<void> {
   await dbUpsertSetting(key, value);
 }
 
-export async function initFromDB(): Promise<{ adminPassword?: string; siteTitle?: string }> {
+export async function initFromDB(): Promise<{ adminPassword?: string; siteTitle?: string; maxDevicesGlobal?: number }> {
   if (!db) {
     console.log('ℹ️ 未配置 DATABASE_URL，使用本地文件存储');
     return {};
@@ -143,6 +157,7 @@ export async function initFromDB(): Promise<{ adminPassword?: string; siteTitle?
         token: sub.token,
         expireAt: sub.expireAt,
         createdAt: sub.createdAt,
+        maxDevices: sub.maxDevices,
       });
     }
     console.log(`✅ 从数据库加载了 ${allSubs.length} 条订阅`);
@@ -158,6 +173,7 @@ export async function initFromDB(): Promise<{ adminPassword?: string; siteTitle?
     return {
       adminPassword: settingsMap['adminPassword'],
       siteTitle: settingsMap['siteTitle'],
+      maxDevicesGlobal: settingsMap['maxDevicesGlobal'] ? Number(settingsMap['maxDevicesGlobal']) : undefined,
     };
   } catch (e) {
     console.error('⚠️ 从数据库加载数据失败，回退到本地文件:', e);
@@ -165,13 +181,14 @@ export async function initFromDB(): Promise<{ adminPassword?: string; siteTitle?
   }
 }
 
-export function createSubscription(name: string, days: number): Subscription {
+export function createSubscription(name: string, days: number, maxDevices = 0): Subscription {
   const sub: Subscription = {
     id: generateId(),
     name,
     token: generateId(),
     expireAt: Date.now() + days * 24 * 60 * 60 * 1000,
-    createdAt: Date.now()
+    createdAt: Date.now(),
+    maxDevices,
   };
   subscriptionStore.set(sub.token, sub);
   dbUpsertSubscription(sub).catch(console.error);
@@ -182,11 +199,12 @@ export function listSubscriptions(): Subscription[] {
   return Array.from(subscriptionStore.values()).sort((a, b) => b.createdAt - a.createdAt);
 }
 
-export function updateSubscriptionById(id: string, updates: { name?: string; expireAt?: number }): Subscription | null {
+export function updateSubscriptionById(id: string, updates: { name?: string; expireAt?: number; maxDevices?: number }): Subscription | null {
   for (const [token, sub] of subscriptionStore.entries()) {
     if (sub.id === id) {
-      if (updates.name) sub.name = updates.name;
-      if (updates.expireAt) sub.expireAt = updates.expireAt;
+      if (updates.name !== undefined) sub.name = updates.name;
+      if (updates.expireAt !== undefined) sub.expireAt = updates.expireAt;
+      if (updates.maxDevices !== undefined) sub.maxDevices = updates.maxDevices;
       subscriptionStore.set(token, sub);
       dbUpsertSubscription(sub).catch(console.error);
       return sub;
@@ -210,38 +228,89 @@ export function findSubscriptionByToken(token: string): Subscription | undefined
   return subscriptionStore.get(token);
 }
 
+export async function getDeviceCount(token: string): Promise<number> {
+  if (!db) return 0;
+  try {
+    const result = await db.select({ cnt: count() }).from(subscriptionDevices)
+      .where(eq(subscriptionDevices.token, token));
+    return result[0]?.cnt ?? 0;
+  } catch { return 0; }
+}
+
+export async function getDeviceCountBatch(tokens: string[]): Promise<Record<string, number>> {
+  if (!db || tokens.length === 0) return {};
+  try {
+    const rows = await db.select({ token: subscriptionDevices.token, cnt: count() })
+      .from(subscriptionDevices)
+      .groupBy(subscriptionDevices.token);
+    const map: Record<string, number> = {};
+    for (const r of rows) map[r.token] = r.cnt;
+    return map;
+  } catch { return {}; }
+}
+
+export async function listDevices(token: string): Promise<DeviceInfo[]> {
+  if (!db) return [];
+  try {
+    const rows = await db.select({ ip: subscriptionDevices.ip, firstSeen: subscriptionDevices.firstSeen })
+      .from(subscriptionDevices).where(eq(subscriptionDevices.token, token));
+    return rows;
+  } catch { return []; }
+}
+
+export async function clearDevices(token: string): Promise<void> {
+  if (!db) return;
+  try {
+    await db.delete(subscriptionDevices).where(eq(subscriptionDevices.token, token));
+  } catch (e) {
+    console.error('⚠️ 清除设备失败:', e);
+  }
+}
+
+export async function checkAndRegisterDevice(
+  token: string, ip: string, maxDevices: number
+): Promise<{ allowed: boolean; count: number }> {
+  if (!db || maxDevices === 0) return { allowed: true, count: 0 };
+  try {
+    const existing = await db.select({ ip: subscriptionDevices.ip })
+      .from(subscriptionDevices)
+      .where(and(eq(subscriptionDevices.token, token), eq(subscriptionDevices.ip, ip)));
+    if (existing.length > 0) return { allowed: true, count: -1 };
+
+    const cnt = await getDeviceCount(token);
+    if (cnt >= maxDevices) return { allowed: false, count: cnt };
+
+    await db.insert(subscriptionDevices)
+      .values({ token, ip, firstSeen: Date.now() })
+      .onConflictDoNothing();
+    return { allowed: true, count: cnt + 1 };
+  } catch {
+    return { allowed: true, count: 0 };
+  }
+}
+
 function decryptEnvelope(envelope: Envelope): DecryptedConfig {
   const encryptedAesKey = Buffer.from(envelope.key, 'base64');
   const aesKey = crypto.privateDecrypt(
-    {
-      key: currentPrivateKey,
-      padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
-      oaepHash: 'sha1'
-    },
+    { key: currentPrivateKey, padding: crypto.constants.RSA_PKCS1_OAEP_PADDING, oaepHash: 'sha1' },
     encryptedAesKey
   );
-
   const iv = Buffer.from(envelope.iv, 'base64');
   const encryptedData = Buffer.from(envelope.data, 'base64');
-
   const decipher = crypto.createDecipheriv('aes-256-cbc', aesKey, iv);
   let decrypted = decipher.update(encryptedData, 'binary', 'utf8');
   decrypted += decipher.final('utf8');
-
   return JSON.parse(decrypted) as DecryptedConfig;
 }
 
 export async function fetchAndUpdateNodes(): Promise<void> {
   console.log(`[${new Date().toLocaleString()}] 开始拉取最新节点...`);
-
   for (const url of API_URLS) {
     try {
       const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
       if (!res.ok) continue;
-
       const envelope = (await res.json()) as Envelope;
       const config = decryptEnvelope(envelope);
-
       if (config && config.nodes && config.nodes.length > 0) {
         nodeData.nodes = config.nodes;
         nodeData.lastUpdate = new Date();
@@ -253,7 +322,6 @@ export async function fetchAndUpdateNodes(): Promise<void> {
       console.warn(`⚠️ 源 ${url} 拉取失败，尝试下一个...`);
     }
   }
-
   nodeData.status = '更新失败，等待重试';
   console.error('❌ 所有节点源拉取失败！');
 }
