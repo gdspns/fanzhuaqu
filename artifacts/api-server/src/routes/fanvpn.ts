@@ -373,7 +373,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
               <td class="p-4">\${statusBadge}</td>
               <td class="p-4 text-right space-x-2">
                 <button onclick="copySubUrl('\${sub.token}', 'clash')" class="text-xs bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 px-3 py-1.5 rounded transition-colors \${isExpired ? 'opacity-50 cursor-not-allowed' : ''}" \${isExpired ? 'disabled' : ''}>复制 Clash</button>
-                <button onclick="openEditModal('\${sub.id}', \`\${sub.name.replace(/\`/g,'')}\`, \${sub.expireAt})" class="text-xs bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 px-3 py-1.5 rounded transition-colors">编辑</button>
+                <button onclick="openEditModal('\${sub.id}', '\${sub.name.replace(/'/g, '&#39;')}', \${sub.expireAt})" class="text-xs bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 px-3 py-1.5 rounded transition-colors">编辑</button>
                 <button onclick="deleteSub('\${sub.id}')" class="text-xs bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 px-3 py-1.5 rounded transition-colors">删除</button>
               </td>\`;
             list.appendChild(row);
