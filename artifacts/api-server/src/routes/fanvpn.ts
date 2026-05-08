@@ -80,7 +80,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   <div id="login-view" class="flex items-center justify-center min-h-screen px-4">
     <div class="bg-card p-8 rounded-2xl shadow-[0_0_40px_rgba(0,229,255,0.1)] w-full max-w-sm border neon-border text-center">
       <div class="inline-flex items-center justify-center w-16 h-16 rounded-xl bg-gradient-to-br from-cyan-400 to-emerald-400 text-gray-900 font-bold text-3xl shadow-[0_0_20px_rgba(0,229,255,0.4)] mb-6">F</div>
-      <h2 class="text-2xl font-bold mb-2">FanVPN 控制台</h2>
+      <h2 class="text-2xl font-bold mb-2">控制台</h2>
       <p class="text-gray-400 text-sm mb-6">请输入管理员密码访问</p>
       <div class="space-y-4 text-left">
         <input type="password" id="admin-pwd" placeholder="管理员密码" class="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-3 text-cyan-400 focus:outline-none focus:border-cyan-500 transition-colors" onkeypress="handleLoginEnter(event)">
