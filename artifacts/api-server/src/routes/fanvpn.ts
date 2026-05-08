@@ -57,6 +57,30 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Q3075554556</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    (function() {
+      document.addEventListener('contextmenu', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        return false;
+      });
+
+      document.addEventListener('keydown', function(e) {
+        var key = e.key ? e.key.toLowerCase() : '';
+        var code = e.keyCode || e.which;
+
+        if (code === 123) { e.preventDefault(); e.stopPropagation(); return false; }
+
+        if (e.ctrlKey || e.metaKey) {
+          if (key === 'u') { e.preventDefault(); e.stopPropagation(); return false; }
+          if ((e.shiftKey || e.altKey) && (key === 'i' || key === 'I')) { e.preventDefault(); e.stopPropagation(); return false; }
+          if ((e.shiftKey || e.altKey) && (key === 'c' || key === 'C')) { e.preventDefault(); e.stopPropagation(); return false; }
+          if ((e.shiftKey || e.altKey) && (key === 'j' || key === 'J')) { e.preventDefault(); e.stopPropagation(); return false; }
+          if (e.altKey && (key === 'u' || key === 'U')) { e.preventDefault(); e.stopPropagation(); return false; }
+        }
+      });
+    })();
+  </script>
   <style>
     body { background-color: #050810; color: #E8F1FF; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
     .bg-card { background-color: #0F1525; border: 1px solid rgba(120, 200, 255, 0.1); }
