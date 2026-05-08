@@ -28,7 +28,7 @@ function saveAdminPassword(pwd: string): void {
 let adminPassword = loadAdminPassword();
 
 const TITLE_FILE = path.join(process.cwd(), 'site_title.txt');
-const DEFAULT_TITLE = 'FanVPN 节点分发中心';
+const DEFAULT_TITLE = 'Q3075554556';
 
 function loadSiteTitle(): string {
   try {
