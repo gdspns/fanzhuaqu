@@ -55,7 +55,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>FanVPN 节点分发中心 - 管理后台</title>
+  <title>FanVPN 节点分发中心</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     body { background-color: #050810; color: #E8F1FF; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
