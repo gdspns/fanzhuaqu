@@ -86,7 +86,8 @@ interface DecryptedConfig {
 export const nodeData = {
   nodes: [] as NodeInfo[],
   lastUpdate: null as Date | null,
-  status: '初始化中'
+  status: '初始化中',
+  changedNodeNames: new Set<string>(),
 };
 
 export const subscriptionStore = new Map<string, Subscription>();
@@ -312,10 +313,22 @@ export async function fetchAndUpdateNodes(): Promise<void> {
       const envelope = (await res.json()) as Envelope;
       const config = decryptEnvelope(envelope);
       if (config && config.nodes && config.nodes.length > 0) {
+        const oldMap = new Map(nodeData.nodes.map(n => [n.name, `${n.server}:${n.port}`]));
+        const changed = new Set<string>();
+        if (nodeData.nodes.length > 0) {
+          for (const node of config.nodes) {
+            const oldKey = oldMap.get(node.name);
+            if (!oldKey || oldKey !== `${node.server}:${node.port}`) {
+              changed.add(node.name);
+            }
+          }
+        }
         nodeData.nodes = config.nodes;
+        changed.forEach(n => nodeData.changedNodeNames.add(n));
         nodeData.lastUpdate = new Date();
         nodeData.status = '更新成功';
-        console.log(`✅ 成功拉取并解密了 ${config.nodes.length} 个节点`);
+        const changedCount = changed.size;
+        console.log(`✅ 成功拉取并解密了 ${config.nodes.length} 个节点${changedCount > 0 ? `，其中 ${changedCount} 个节点链接有变化` : ''}`);
         return;
       }
     } catch {
