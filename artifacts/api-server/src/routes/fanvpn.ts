@@ -339,7 +339,13 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   <script>
     function handleLoginEnter(e) { if (e.key === 'Enter') login(); }
 
-    let sessionPwd = '';
+    let sessionPwd = sessionStorage.getItem('fanvpn_pwd') || '';
+
+    function showDashboard() {
+      document.getElementById('login-view').classList.add('hidden');
+      document.getElementById('dashboard-view').classList.remove('hidden');
+      initDashboard();
+    }
 
     function login() {
       const pwd = document.getElementById('admin-pwd').value;
@@ -350,9 +356,8 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       }).then(r => {
         if (r.ok) {
           sessionPwd = pwd;
-          document.getElementById('login-view').classList.add('hidden');
-          document.getElementById('dashboard-view').classList.remove('hidden');
-          initDashboard();
+          sessionStorage.setItem('fanvpn_pwd', pwd);
+          showDashboard();
         } else {
           const err = document.getElementById('login-error');
           err.classList.remove('hidden');
@@ -366,14 +371,31 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     }
 
     function clearChanges() {
-      fetch('/api/clear-changes', { method: 'POST', headers: { 'x-admin-password': document.getElementById('admin-pwd').value } })
+      fetch('/api/clear-changes', { method: 'POST', headers: { 'x-admin-password': sessionPwd } })
         .then(() => initDashboard());
     }
 
     function logout() {
+      sessionPwd = '';
+      sessionStorage.removeItem('fanvpn_pwd');
       document.getElementById('admin-pwd').value = '';
       document.getElementById('dashboard-view').classList.add('hidden');
       document.getElementById('login-view').classList.remove('hidden');
+    }
+
+    if (sessionPwd) {
+      fetch('/api/admin/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: sessionPwd })
+      }).then(r => {
+        if (r.ok) {
+          showDashboard();
+        } else {
+          sessionPwd = '';
+          sessionStorage.removeItem('fanvpn_pwd');
+        }
+      }).catch(() => {});
     }
 
     function initDashboard() {
