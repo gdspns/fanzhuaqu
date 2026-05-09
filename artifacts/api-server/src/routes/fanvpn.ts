@@ -381,17 +381,20 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
           if (data.nodes.length === 0) {
             grid.innerHTML = '<div class="col-span-full p-8 text-center text-gray-500">后端暂未抓取到节点，请稍候刷新...</div>';
           }
+          const changedSet = new Set(data.changedNodeNames || []);
           data.nodes.forEach(node => {
+            const isChanged = changedSet.has(node.name);
             grid.innerHTML += \`
-              <div class="bg-elevated p-4 rounded-xl hover:border-cyan-500 transition-colors cursor-default">
+              <div class="bg-elevated p-4 rounded-xl transition-colors cursor-default \${isChanged ? 'border border-rose-500 shadow-[0_0_12px_rgba(239,68,68,0.4)]' : 'hover:border-cyan-500'}">
                 <div class="flex items-center gap-3 mb-3">
-                  <div class="w-8 h-8 rounded bg-gray-800 flex items-center justify-center font-bold text-xs border neon-border">\${node.flag || '🌐'}</div>
-                  <div class="font-semibold text-sm truncate">\${node.name}</div>
+                  <div class="w-8 h-8 rounded bg-gray-800 flex items-center justify-center font-bold text-xs border \${isChanged ? 'border-rose-500' : 'neon-border'}">\${node.flag || '🌐'}</div>
+                  <div class="font-semibold text-sm truncate flex-1">\${node.name}</div>
+                  \${isChanged ? '<span class="text-xs px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-400 border border-rose-500/40 whitespace-nowrap">已更新</span>' : ''}
                 </div>
                 <div class="text-xs text-gray-500 font-mono space-y-1">
                   <div class="flex justify-between"><span>协议:</span> <span class="text-gray-300">HTTPS Proxy</span></div>
                   <div class="flex justify-between"><span>端口:</span> <span class="text-gray-300">\${node.port}</span></div>
-                  <div class="flex justify-between border-t border-gray-800 mt-2 pt-2 truncate"><span class="text-cyan-600">\${node.server}</span></div>
+                  <div class="flex justify-between border-t border-gray-800 mt-2 pt-2 truncate"><span class="\${isChanged ? 'text-rose-400' : 'text-cyan-600'}">\${node.server}</span></div>
                 </div>
               </div>\`;
           });
@@ -797,7 +800,8 @@ router.get('/status', (_req, res) => {
     count: nodeData.nodes.length,
     lastUpdate: nodeData.lastUpdate,
     status: nodeData.status,
-    nodes: nodeData.nodes
+    nodes: nodeData.nodes,
+    changedNodeNames: Array.from(nodeData.changedNodeNames),
   });
 });
 
