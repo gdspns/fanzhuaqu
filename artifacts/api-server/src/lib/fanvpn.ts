@@ -324,7 +324,7 @@ export async function fetchAndUpdateNodes(): Promise<void> {
           }
         }
         nodeData.nodes = config.nodes;
-        nodeData.changedNodeNames = changed;
+        changed.forEach(n => nodeData.changedNodeNames.add(n));
         nodeData.lastUpdate = new Date();
         nodeData.status = '更新成功';
         const changedCount = changed.size;

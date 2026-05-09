@@ -145,8 +145,11 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     <!-- 节点概览 Tab -->
     <div id="view-nodes" class="space-y-4 block">
       <div class="flex justify-between items-end mb-2">
-        <h2 class="text-xl font-semibold">📡 当前可用节点 (<span id="node-count">0</span>)</h2>
-        <span class="text-xs text-gray-500">每2小时自动从源码更新</span>
+        <h2 class="text-xl font-semibold">📡 当前可用节点 (<span id="node-count">0</span>) <span id="changed-badge" class="hidden text-sm font-normal px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-400 border border-rose-500/40 ml-1">有更新</span></h2>
+        <div class="flex items-center gap-3">
+          <button id="clear-changes-btn" onclick="clearChanges()" class="hidden text-xs px-3 py-1.5 rounded-lg border border-rose-500/40 text-rose-400 hover:bg-rose-500/10 transition-colors">✓ 标记已读</button>
+          <span class="text-xs text-gray-500">每2小时自动从源码更新</span>
+        </div>
       </div>
       <div id="nodes-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
     </div>
@@ -362,6 +365,11 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       });
     }
 
+    function clearChanges() {
+      fetch('/api/clear-changes', { method: 'POST', headers: { 'x-admin-password': document.getElementById('admin-pwd').value } })
+        .then(() => initDashboard());
+    }
+
     function logout() {
       document.getElementById('admin-pwd').value = '';
       document.getElementById('dashboard-view').classList.add('hidden');
@@ -382,6 +390,9 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
             grid.innerHTML = '<div class="col-span-full p-8 text-center text-gray-500">后端暂未抓取到节点，请稍候刷新...</div>';
           }
           const changedSet = new Set(data.changedNodeNames || []);
+          const hasChanges = changedSet.size > 0;
+          document.getElementById('changed-badge').classList.toggle('hidden', !hasChanges);
+          document.getElementById('clear-changes-btn').classList.toggle('hidden', !hasChanges);
           data.nodes.forEach(node => {
             const isChanged = changedSet.has(node.name);
             grid.innerHTML += \`
@@ -791,6 +802,14 @@ router.put('/admin/password', requireAdmin, (req, res) => {
   }
   adminPassword = newPassword;
   saveAdminPassword(newPassword);
+  res.json({ ok: true });
+});
+
+// ===== API: 清除节点变化标记 =====
+router.post('/clear-changes', (req, res) => {
+  const pwd = req.headers['x-admin-password'] as string | undefined;
+  if (pwd !== adminPassword) return res.status(401).json({ error: '未授权' });
+  nodeData.changedNodeNames.clear();
   res.json({ ok: true });
 });
 
