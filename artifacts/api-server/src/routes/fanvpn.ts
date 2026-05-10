@@ -258,8 +258,8 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
           <input type="text" id="sub-name" placeholder="输入识别名称..." class="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-cyan-400 focus:outline-none focus:border-cyan-500">
         </div>
         <div>
-          <label class="block text-sm text-gray-400 mb-1">到期日期</label>
-          <input type="date" id="sub-expire-date" class="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-cyan-400 focus:outline-none focus:border-cyan-500 [color-scheme:dark]">
+          <label class="block text-sm text-gray-400 mb-1">到期时间</label>
+          <input type="datetime-local" id="sub-expire-date" class="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-cyan-400 focus:outline-none focus:border-cyan-500 [color-scheme:dark]">
           <div class="flex gap-2 mt-2">
             <button onclick="setQuickDate(7)" class="quick-btn flex-1 border border-gray-700 bg-gray-900 rounded-lg py-1.5 text-xs hover:border-cyan-500 hover:text-cyan-400 transition-colors">+7天</button>
             <button onclick="setQuickDate(30)" class="quick-btn flex-1 border border-gray-700 bg-gray-900 rounded-lg py-1.5 text-xs hover:border-cyan-500 hover:text-cyan-400 transition-colors">+30天</button>
@@ -294,8 +294,8 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
           <input type="text" id="edit-sub-name" placeholder="输入备注名称..." class="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-cyan-400 focus:outline-none focus:border-cyan-500">
         </div>
         <div>
-          <label class="block text-sm text-gray-400 mb-1">到期日期</label>
-          <input type="date" id="edit-expire-date" class="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-cyan-400 focus:outline-none focus:border-cyan-500 [color-scheme:dark]">
+          <label class="block text-sm text-gray-400 mb-1">到期时间</label>
+          <input type="datetime-local" id="edit-expire-date" class="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-cyan-400 focus:outline-none focus:border-cyan-500 [color-scheme:dark]">
           <div class="flex gap-2 mt-2">
             <button onclick="setEditQuickDate(7)" class="flex-1 border border-gray-700 bg-gray-900 rounded-lg py-1.5 text-xs hover:border-cyan-500 hover:text-cyan-400 transition-colors">+7天</button>
             <button onclick="setEditQuickDate(30)" class="flex-1 border border-gray-700 bg-gray-900 rounded-lg py-1.5 text-xs hover:border-cyan-500 hover:text-cyan-400 transition-colors">+30天</button>
@@ -465,7 +465,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
           emptyState.classList.add('hidden');
           subs.forEach(sub => {
             const isExpired = Date.now() > sub.expireAt;
-            const expireDate = new Date(sub.expireAt).toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' });
+            const expireDate = new Date(sub.expireAt).toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
             const statusBadge = isExpired
               ? '<span class="px-2 py-1 rounded bg-rose-500/10 text-rose-400 text-xs border border-rose-500/20">已过期</span>'
               : '<span class="px-2 py-1 rounded bg-emerald-500/10 text-emerald-400 text-xs border border-emerald-500/20">正常</span>';
@@ -503,7 +503,8 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     function setQuickDate(days) {
       const d = new Date();
       d.setDate(d.getDate() + days);
-      document.getElementById('sub-expire-date').value = d.toISOString().slice(0, 10);
+      d.setHours(23, 59, 59, 0);
+      document.getElementById('sub-expire-date').value = d.toISOString().slice(0, 16);
     }
 
     function openModal() {
@@ -522,9 +523,9 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       const dateVal = document.getElementById('sub-expire-date').value;
       const maxDevices = parseInt(document.getElementById('sub-max-devices').value) || 0;
       if (!name) { showToast('请输入备注名称', true); return; }
-      if (!dateVal) { showToast('请选择到期日期', true); return; }
-      const expireAt = new Date(dateVal + 'T23:59:59').getTime();
-      if (expireAt <= Date.now()) { showToast('到期日期必须是未来的日期', true); return; }
+      if (!dateVal) { showToast('请选择到期时间', true); return; }
+      const expireAt = new Date(dateVal).getTime();
+      if (expireAt <= Date.now()) { showToast('到期时间必须是未来的时间', true); return; }
       fetch('/api/subs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -606,7 +607,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       document.getElementById('edit-sub-name').value = name;
       document.getElementById('edit-max-devices').value = maxDevices || 0;
       const d = new Date(expireAt);
-      document.getElementById('edit-expire-date').value = d.toISOString().slice(0, 10);
+      document.getElementById('edit-expire-date').value = d.toISOString().slice(0, 16);
       document.getElementById('edit-modal').classList.remove('hidden');
       setTimeout(() => {
         document.getElementById('edit-modal').classList.remove('opacity-0');
@@ -623,7 +624,8 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     function setEditQuickDate(days) {
       const d = new Date();
       d.setDate(d.getDate() + days);
-      document.getElementById('edit-expire-date').value = d.toISOString().slice(0, 10);
+      d.setHours(23, 59, 59, 0);
+      document.getElementById('edit-expire-date').value = d.toISOString().slice(0, 16);
     }
 
     function saveEdit() {
@@ -632,8 +634,8 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       const dateVal = document.getElementById('edit-expire-date').value;
       const maxDevices = parseInt(document.getElementById('edit-max-devices').value) || 0;
       if (!name) { showToast('备注名称不能为空', true); return; }
-      if (!dateVal) { showToast('请选择到期日期', true); return; }
-      const expireAt = new Date(dateVal + 'T23:59:59').getTime();
+      if (!dateVal) { showToast('请选择到期时间', true); return; }
+      const expireAt = new Date(dateVal).getTime();
       fetch('/api/subs/' + id, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
