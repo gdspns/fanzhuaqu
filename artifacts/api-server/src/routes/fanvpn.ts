@@ -930,7 +930,15 @@ router.get('/sub/clash', (req, res) => {
 router.get('/sub/clash/:token', async (req, res) => {
   const sub = findSubscriptionByToken(req.params.token);
   if (!sub) return res.status(404).send('订阅不存在');
-  if (Date.now() > sub.expireAt) return res.status(403).send('订阅已过期');
+
+  res.setHeader('Content-Type', 'text/yaml; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="fanvpn_clash.yaml"');
+
+  if (Date.now() > sub.expireAt) {
+    res.setHeader('Subscription-Userinfo', `upload=0; download=0; total=1073741824000; expire=1`);
+    return res.send(buildExpiredClashYaml());
+  }
+
   if (nodeData.nodes.length === 0) return res.status(503).send('节点未准备好，请稍后再试');
 
   if (sub.maxDevices > 0) {
@@ -940,8 +948,6 @@ router.get('/sub/clash/:token', async (req, res) => {
   }
 
   const expireSeconds = Math.floor(sub.expireAt / 1000);
-  res.setHeader('Content-Type', 'text/yaml; charset=utf-8');
-  res.setHeader('Content-Disposition', 'attachment; filename="fanvpn_clash.yaml"');
   res.setHeader('Subscription-Userinfo', `upload=0; download=0; total=1073741824000; expire=${expireSeconds}`);
   res.send(buildClashYaml());
 });
@@ -956,7 +962,13 @@ router.get('/sub/base64', (req, res) => {
 router.get('/sub/base64/:token', async (req, res) => {
   const sub = findSubscriptionByToken(req.params.token);
   if (!sub) return res.status(404).send('订阅不存在');
-  if (Date.now() > sub.expireAt) return res.status(403).send('订阅已过期');
+
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+
+  if (Date.now() > sub.expireAt) {
+    return res.send(buildExpiredBase64());
+  }
+
   if (nodeData.nodes.length === 0) return res.status(503).send('节点未准备好');
 
   if (sub.maxDevices > 0) {
@@ -965,7 +977,6 @@ router.get('/sub/base64/:token', async (req, res) => {
     if (!allowed) return res.status(403).send(`设备数已达上限 (${sub.maxDevices})，如需更换设备请联系管理员`);
   }
 
-  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
   res.send(buildBase64());
 });
 
@@ -1054,6 +1065,48 @@ function buildClashYaml(): string {
 function buildBase64(): string {
   const lines = nodeData.nodes.map(n => `https://${n.server}:${n.port}#${encodeURIComponent(n.name)}`).join('\n');
   return Buffer.from(lines).toString('base64');
+}
+
+const EXPIRED_NODE_NAME = '❌ 您的服务已到期，请联系管理员续费';
+const EXPIRED_SERVER = '127.0.0.1';
+const EXPIRED_PORT = 65535;
+
+function buildExpiredClashYaml(): string {
+  return [
+    'mixed-port: 7890',
+    'allow-lan: false',
+    'mode: rule',
+    'log-level: info',
+    'external-controller: 127.0.0.1:9090',
+    '',
+    'proxies:',
+    `  - name: "${EXPIRED_NODE_NAME}"`,
+    `    type: http`,
+    `    server: ${EXPIRED_SERVER}`,
+    `    port: ${EXPIRED_PORT}`,
+    `    tls: false`,
+    '',
+    'proxy-groups:',
+    `  - name: "🚀 节点选择"`,
+    `    type: select`,
+    `    proxies:`,
+    `    - "${EXPIRED_NODE_NAME}"`,
+    '',
+    `  - name: "♻️ 自动选择"`,
+    `    type: url-test`,
+    `    url: http://www.gstatic.com/generate_204`,
+    `    interval: 300`,
+    `    proxies:`,
+    `    - "${EXPIRED_NODE_NAME}"`,
+    '',
+    'rules:',
+    '  - MATCH,🚀 节点选择',
+  ].join('\n');
+}
+
+function buildExpiredBase64(): string {
+  const line = `https://${EXPIRED_SERVER}:${EXPIRED_PORT}#${encodeURIComponent(EXPIRED_NODE_NAME)}`;
+  return Buffer.from(line).toString('base64');
 }
 
 export default router;
