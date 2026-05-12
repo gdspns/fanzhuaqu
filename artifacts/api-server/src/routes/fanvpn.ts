@@ -950,7 +950,7 @@ router.get('/sub/clash/:token', async (req, res) => {
   }
 
   const expireSeconds = Math.floor(sub.expireAt / 1000);
-  //res.setHeader('Subscription-Userinfo', `upload=0; download=0; total=0; expire=${expireSeconds}`);
+  res.setHeader('Subscription-Userinfo', `; expire=${expireSeconds}`);
   res.send(buildClashYaml());
 });
 
