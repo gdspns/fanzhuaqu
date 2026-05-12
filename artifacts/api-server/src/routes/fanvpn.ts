@@ -925,7 +925,7 @@ router.get('/sub/clash', (req, res) => {
   }
   res.setHeader('Content-Type', 'text/yaml; charset=utf-8');
   res.setHeader('Content-Disposition', 'attachment; filename="fanvpn_clash.yaml"');
-  res.setHeader('Subscription-Userinfo', `expire=4102444800`);
+  res.setHeader('Subscription-Userinfo', `upload=0; download=0; total=109951162777600; expire=4102444800`);
   res.send(buildClashYaml());
 });
 
@@ -950,7 +950,7 @@ router.get('/sub/clash/:token', async (req, res) => {
   }
 
   const expireSeconds = Math.floor(sub.expireAt / 1000);
-  res.setHeader('Subscription-Userinfo', `expire=${expireSeconds}`);
+  res.setHeader('Subscription-Userinfo', `upload=0; download=0; total=109951162777600; expire=${expireSeconds}`);
   res.send(buildClashYaml());
 });
 
