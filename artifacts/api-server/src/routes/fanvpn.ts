@@ -925,7 +925,7 @@ router.get('/sub/clash', (req, res) => {
   }
   res.setHeader('Content-Type', 'text/yaml; charset=utf-8');
   res.setHeader('Content-Disposition', 'attachment; filename="fanvpn_clash.yaml"');
-  //res.setHeader('Subscription-Userinfo', `upload=0; download=0; total=0; expire=4102444800`);
+  res.setHeader('Subscription-Userinfo', `; expire=4102444800`);
   res.send(buildClashYaml());
 });
 
