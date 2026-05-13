@@ -983,7 +983,7 @@ router.get('/sub/base64/:token', async (req, res) => {
 });
 
 // ===== 面板 =====
-router.get('/dashboard', (_req, res) => {
+router.get('/my-fan-admin-8392', (_req, res) => {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.send(DASHBOARD_HTML);
 });
