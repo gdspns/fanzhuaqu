@@ -35,7 +35,7 @@ app.use(express.urlencoded({ extended: true }));
 startNodeScheduler();
 
 app.get("/", (_req, res) => {
-  res.redirect("/api/dashboard");
+  res.status(404).send("Not Found");
 });
 
 app.use("/api", router);
