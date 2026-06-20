@@ -497,9 +497,15 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
           const list = document.getElementById('custom-nodes-list');
           const empty = document.getElementById('custom-nodes-empty');
           document.getElementById('custom-node-count').innerText = nodes.length;
-          list.innerHTML = '';
+          
+          // 清空列表，但保留 empty 元素
+          Array.from(list.children).forEach(child => {
+            if (child.id !== 'custom-nodes-empty') {
+              child.remove();
+            }
+          });
+          
           if (nodes.length === 0) {
-            list.appendChild(empty);
             empty.classList.remove('hidden');
             return;
           }
