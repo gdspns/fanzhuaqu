@@ -134,6 +134,17 @@ export function addCustomNode(node: NodeInfo): { ok: boolean; error?: string } {
   return { ok: true };
 }
 
+export function updateCustomNode(oldName: string, newName: string): { ok: boolean; error?: string } {
+  const idx = customNodes.findIndex(n => n.name === oldName);
+  if (idx === -1) return { ok: false, error: '节点不存在' };
+  if (oldName !== newName && customNodes.find(n => n.name === newName)) {
+    return { ok: false, error: '节点名称已存在' };
+  }
+  customNodes[idx].name = newName;
+  dbUpsertSetting('customNodes', JSON.stringify(customNodes)).catch(console.error);
+  return { ok: true };
+}
+
 export function deleteCustomNode(name: string): boolean {
   const idx = customNodes.findIndex(n => n.name === name);
   if (idx === -1) return false;

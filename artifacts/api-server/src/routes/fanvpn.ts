@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import fs from 'fs';
 import path from 'path';
-import { nodeData, createSubscription, listSubscriptions, deleteSubscriptionById, updateSubscriptionById, findSubscriptionByToken, getPrivateKey, setPrivateKey, initFromDB, saveSetting, checkAndRegisterDevice, getDeviceCountBatch, listDevices, clearDevices, listCustomNodes, addCustomNode, deleteCustomNode, importProxyLinks } from '../lib/fanvpn.js';
+import { nodeData, createSubscription, listSubscriptions, deleteSubscriptionById, updateSubscriptionById, findSubscriptionByToken, getPrivateKey, setPrivateKey, initFromDB, saveSetting, checkAndRegisterDevice, getDeviceCountBatch, listDevices, clearDevices, listCustomNodes, addCustomNode, updateCustomNode, deleteCustomNode, importProxyLinks } from '../lib/fanvpn.js';
 
 const router = Router();
 
@@ -1055,6 +1055,18 @@ router.post('/custom-nodes', (req, res) => {
     return res.status(400).json({ error: '参数错误：需要 name、server、port (1-65535)' });
   }
   const result = addCustomNode({ name: name.trim(), server: server.trim(), port, flag: flag?.trim() || undefined });
+  if (!result.ok) return res.status(409).json({ error: result.error });
+  res.json({ ok: true });
+});
+
+router.put('/custom-nodes/:name', (req, res) => {
+  const pwd = req.headers['x-admin-password'] as string | undefined;
+  if (pwd !== adminPassword) return res.status(401).json({ error: '未授权' });
+  const { newName } = req.body as { newName?: string };
+  if (!newName || typeof newName !== 'string' || !newName.trim()) {
+    return res.status(400).json({ error: '参数错误：需要 newName' });
+  }
+  const result = updateCustomNode(decodeURIComponent(req.params.name), newName.trim());
   if (!result.ok) return res.status(409).json({ error: result.error });
   res.json({ ok: true });
 });
