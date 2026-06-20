@@ -92,6 +92,26 @@ export const nodeData = {
 
 export const subscriptionStore = new Map<string, Subscription>();
 
+// ===== 自定义节点 =====
+let customNodes: NodeInfo[] = [];
+
+export function listCustomNodes(): NodeInfo[] { return [...customNodes]; }
+
+export function addCustomNode(node: NodeInfo): { ok: boolean; error?: string } {
+  if (customNodes.find(n => n.name === node.name)) return { ok: false, error: '节点名称已存在' };
+  customNodes.push(node);
+  dbUpsertSetting('customNodes', JSON.stringify(customNodes)).catch(console.error);
+  return { ok: true };
+}
+
+export function deleteCustomNode(name: string): boolean {
+  const idx = customNodes.findIndex(n => n.name === name);
+  if (idx === -1) return false;
+  customNodes.splice(idx, 1);
+  dbUpsertSetting('customNodes', JSON.stringify(customNodes)).catch(console.error);
+  return true;
+}
+
 function generateId(): string {
   return Math.random().toString(36).substring(2, 10) + Math.random().toString(36).substring(2, 8);
 }
@@ -169,6 +189,13 @@ export async function initFromDB(): Promise<{ adminPassword?: string; siteTitle?
     if (settingsMap['privateKey']) {
       currentPrivateKey = settingsMap['privateKey'];
       console.log('✅ 从数据库加载了自定义私钥');
+    }
+
+    if (settingsMap['customNodes']) {
+      try {
+        customNodes = JSON.parse(settingsMap['customNodes']) as NodeInfo[];
+        console.log(`✅ 从数据库加载了 ${customNodes.length} 个自定义节点`);
+      } catch { customNodes = []; }
     }
 
     return {

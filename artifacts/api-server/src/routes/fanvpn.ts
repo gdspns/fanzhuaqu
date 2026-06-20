@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import fs from 'fs';
 import path from 'path';
-import { nodeData, createSubscription, listSubscriptions, deleteSubscriptionById, updateSubscriptionById, findSubscriptionByToken, getPrivateKey, setPrivateKey, initFromDB, saveSetting, checkAndRegisterDevice, getDeviceCountBatch, listDevices, clearDevices } from '../lib/fanvpn.js';
+import { nodeData, createSubscription, listSubscriptions, deleteSubscriptionById, updateSubscriptionById, findSubscriptionByToken, getPrivateKey, setPrivateKey, initFromDB, saveSetting, checkAndRegisterDevice, getDeviceCountBatch, listDevices, clearDevices, listCustomNodes, addCustomNode, deleteCustomNode } from '../lib/fanvpn.js';
 
 const router = Router();
 
@@ -152,6 +152,17 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
         </div>
       </div>
       <div id="nodes-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+
+      <!-- 自定义节点管理 -->
+      <div class="mt-2 border-t border-gray-800 pt-5">
+        <div class="flex justify-between items-center mb-3">
+          <h3 class="text-base font-semibold text-gray-300">✏️ 自定义节点 <span class="text-gray-500 text-sm font-normal">(<span id="custom-node-count">0</span> 个，与上方节点合并下发给用户)</span></h3>
+          <button onclick="openAddCustomNodeModal()" class="text-xs px-3 py-1.5 rounded-lg bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 hover:bg-cyan-500/20 transition-colors">+ 添加节点</button>
+        </div>
+        <div id="custom-nodes-list" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+          <div id="custom-nodes-empty" class="col-span-full p-5 text-center text-gray-600 text-sm">暂无自定义节点，点击右上角添加</div>
+        </div>
+      </div>
     </div>
 
     <!-- 订阅管理 Tab -->
@@ -315,6 +326,41 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     </div>
   </div>
 
+  <!-- 添加自定义节点弹窗 -->
+  <div id="add-cn-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center hidden opacity-0 transition-opacity">
+    <div id="add-cn-modal-box" class="bg-card p-6 rounded-2xl border border-gray-700 shadow-2xl w-full max-w-md transform scale-95 transition-transform">
+      <div class="flex justify-between items-center mb-4">
+        <h3 class="text-lg font-bold text-white">✏️ 添加自定义节点</h3>
+        <button onclick="closeAddCnModal()" class="text-gray-500 hover:text-white text-xl">&times;</button>
+      </div>
+      <div class="space-y-3">
+        <div>
+          <label class="block text-sm text-gray-400 mb-1">节点名称</label>
+          <input type="text" id="cn-name" placeholder="例: 🇺🇸 美国节点01" class="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-cyan-400 focus:outline-none focus:border-cyan-500">
+        </div>
+        <div>
+          <label class="block text-sm text-gray-400 mb-1">服务器地址</label>
+          <input type="text" id="cn-server" placeholder="例: 1.2.3.4 或 node.example.com" class="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-cyan-400 focus:outline-none focus:border-cyan-500">
+        </div>
+        <div class="flex gap-3">
+          <div class="flex-1">
+            <label class="block text-sm text-gray-400 mb-1">端口</label>
+            <input type="number" id="cn-port" placeholder="443" min="1" max="65535" class="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-cyan-400 focus:outline-none focus:border-cyan-500">
+          </div>
+          <div class="w-28">
+            <label class="block text-sm text-gray-400 mb-1">旗帜 (可选)</label>
+            <input type="text" id="cn-flag" placeholder="🇺🇸" class="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-cyan-400 focus:outline-none focus:border-cyan-500">
+          </div>
+        </div>
+        <p class="text-xs text-gray-600">协议格式与自动抓取节点相同 (HTTPS Proxy / HTTP Tunnel)，填入服务器地址和端口即可。</p>
+        <div class="flex gap-3 pt-1">
+          <button onclick="closeAddCnModal()" class="flex-1 py-2.5 rounded-lg border border-gray-700 text-gray-400 hover:bg-gray-800 transition-colors">取消</button>
+          <button onclick="doAddCustomNode()" class="flex-1 py-2.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-gray-900 font-bold transition-colors">添加</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- 设备列表弹窗 -->
   <div id="devices-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center hidden opacity-0 transition-opacity">
     <div class="bg-card p-6 rounded-2xl border border-gray-700 shadow-2xl w-full max-w-md transform scale-95 transition-transform" id="devices-modal-box">
@@ -375,6 +421,86 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
         .then(() => initDashboard());
     }
 
+    // ===== 自定义节点管理 =====
+    function openAddCustomNodeModal() {
+      document.getElementById('cn-name').value = '';
+      document.getElementById('cn-server').value = '';
+      document.getElementById('cn-port').value = '';
+      document.getElementById('cn-flag').value = '';
+      const m = document.getElementById('add-cn-modal');
+      m.classList.remove('hidden');
+      setTimeout(() => { m.classList.remove('opacity-0'); document.getElementById('add-cn-modal-box').classList.remove('scale-95'); }, 10);
+    }
+
+    function closeAddCnModal() {
+      const m = document.getElementById('add-cn-modal');
+      m.classList.add('opacity-0');
+      document.getElementById('add-cn-modal-box').classList.add('scale-95');
+      setTimeout(() => m.classList.add('hidden'), 300);
+    }
+
+    function doAddCustomNode() {
+      const name = document.getElementById('cn-name').value.trim();
+      const server = document.getElementById('cn-server').value.trim();
+      const port = parseInt(document.getElementById('cn-port').value);
+      const flag = document.getElementById('cn-flag').value.trim();
+      if (!name) { showToast('请填写节点名称', true); return; }
+      if (!server) { showToast('请填写服务器地址', true); return; }
+      if (!port || port < 1 || port > 65535) { showToast('请填写有效端口 (1-65535)', true); return; }
+      fetch('/api/custom-nodes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-admin-password': sessionPwd },
+        body: JSON.stringify({ name, server, port, flag: flag || undefined })
+      }).then(r => r.json()).then(d => {
+        if (d.ok) { closeAddCnModal(); renderCustomNodes(); showToast('节点已添加'); }
+        else showToast(d.error || '添加失败', true);
+      }).catch(() => showToast('请求失败', true));
+    }
+
+    function doDeleteCustomNode(name) {
+      if (!confirm(\`确认删除节点「\${name}」？用户下次刷新订阅后该节点消失。\`)) return;
+      fetch('/api/custom-nodes/' + encodeURIComponent(name), {
+        method: 'DELETE',
+        headers: { 'x-admin-password': sessionPwd }
+      }).then(r => r.json()).then(d => {
+        if (d.ok) { renderCustomNodes(); showToast('节点已删除'); }
+        else showToast(d.error || '删除失败', true);
+      }).catch(() => showToast('请求失败', true));
+    }
+
+    function renderCustomNodes() {
+      fetch('/api/custom-nodes')
+        .then(r => r.json())
+        .then(nodes => {
+          const list = document.getElementById('custom-nodes-list');
+          const empty = document.getElementById('custom-nodes-empty');
+          document.getElementById('custom-node-count').innerText = nodes.length;
+          list.innerHTML = '';
+          if (nodes.length === 0) {
+            list.appendChild(empty);
+            empty.classList.remove('hidden');
+            return;
+          }
+          empty.classList.add('hidden');
+          nodes.forEach(node => {
+            const card = document.createElement('div');
+            card.className = 'bg-elevated p-4 rounded-xl border border-cyan-900/40 hover:border-cyan-700/60 transition-colors relative';
+            card.innerHTML = \`
+              <div class="flex items-center gap-3 mb-3">
+                <div class="w-8 h-8 rounded bg-gray-800 flex items-center justify-center font-bold text-xs border border-cyan-800">\${node.flag || '🌐'}</div>
+                <div class="font-semibold text-sm truncate flex-1 text-cyan-300">\${node.name}</div>
+                <button onclick="doDeleteCustomNode('\${node.name.replace(/'/g, "\\\\'")}') " class="text-gray-600 hover:text-rose-400 transition-colors text-lg leading-none">&times;</button>
+              </div>
+              <div class="text-xs text-gray-500 font-mono space-y-1">
+                <div class="flex justify-between"><span>协议:</span> <span class="text-gray-300">HTTPS Proxy</span></div>
+                <div class="flex justify-between"><span>端口:</span> <span class="text-gray-300">\${node.port}</span></div>
+                <div class="flex justify-between border-t border-gray-800 mt-2 pt-2 truncate"><span class="text-cyan-600">\${node.server}</span></div>
+              </div>\`;
+            list.appendChild(card);
+          });
+        });
+    }
+
     function logout() {
       sessionPwd = '';
       sessionStorage.removeItem('fanvpn_pwd');
@@ -399,6 +525,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     }
 
     function initDashboard() {
+      renderCustomNodes();
       fetch('/api/status')
         .then(r => r.json())
         .then(data => {
@@ -829,6 +956,31 @@ router.put('/admin/password', requireAdmin, (req, res) => {
   res.json({ ok: true });
 });
 
+// ===== API: 自定义节点 CRUD =====
+router.get('/custom-nodes', (_req, res) => {
+  res.json(listCustomNodes());
+});
+
+router.post('/custom-nodes', (req, res) => {
+  const pwd = req.headers['x-admin-password'] as string | undefined;
+  if (pwd !== adminPassword) return res.status(401).json({ error: '未授权' });
+  const { name, server, port, flag } = req.body as { name?: string; server?: string; port?: number; flag?: string };
+  if (!name || !server || typeof port !== 'number' || port < 1 || port > 65535) {
+    return res.status(400).json({ error: '参数错误：需要 name、server、port (1-65535)' });
+  }
+  const result = addCustomNode({ name: name.trim(), server: server.trim(), port, flag: flag?.trim() || undefined });
+  if (!result.ok) return res.status(409).json({ error: result.error });
+  res.json({ ok: true });
+});
+
+router.delete('/custom-nodes/:name', (req, res) => {
+  const pwd = req.headers['x-admin-password'] as string | undefined;
+  if (pwd !== adminPassword) return res.status(401).json({ error: '未授权' });
+  const ok = deleteCustomNode(decodeURIComponent(req.params.name));
+  if (!ok) return res.status(404).json({ error: '节点不存在' });
+  res.json({ ok: true });
+});
+
 // ===== API: 清除节点变化标记 =====
 router.post('/clear-changes', (req, res) => {
   const pwd = req.headers['x-admin-password'] as string | undefined;
@@ -1024,7 +1176,8 @@ router.delete('/subs/:id/devices', requireAdmin, async (req, res) => {
 function buildClashYaml(): string {
   const proxyNames: string[] = [];
   const proxyLines: string[] = [];
-  nodeData.nodes.forEach(node => {
+  const allNodes = [...nodeData.nodes, ...listCustomNodes()];
+  allNodes.forEach(node => {
     const safeName = node.name.replace(/["\n]/g, '');
     proxyNames.push(safeName);
     proxyLines.push(`  - name: "${safeName}"`);
@@ -1065,7 +1218,8 @@ function buildClashYaml(): string {
 }
 
 function buildBase64(): string {
-  const lines = nodeData.nodes.map(n => `https://${n.server}:${n.port}#${encodeURIComponent(n.name)}`).join('\n');
+  const allNodes = [...nodeData.nodes, ...listCustomNodes()];
+  const lines = allNodes.map(n => `https://${n.server}:${n.port}#${encodeURIComponent(n.name)}`).join('\n');
   return Buffer.from(lines).toString('base64');
 }
 
