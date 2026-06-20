@@ -1275,14 +1275,89 @@ function buildClashYaml(): string {
   const proxyNames: string[] = [];
   const proxyLines: string[] = [];
   const allNodes = [...nodeData.nodes, ...listCustomNodes()];
+  
   allNodes.forEach(node => {
     const safeName = node.name.replace(/["\n]/g, '');
     proxyNames.push(safeName);
     proxyLines.push(`  - name: "${safeName}"`);
-    proxyLines.push(`    type: http`);
-    proxyLines.push(`    server: ${node.server}`);
-    proxyLines.push(`    port: ${node.port}`);
-    proxyLines.push(`    tls: true`);
+    
+    // 根据节点类型生成不同的配置
+    const nodeType = node.type || 'http';
+    
+    if (nodeType === 'ss') {
+      // Shadowsocks
+      proxyLines.push(`    type: ss`);
+      proxyLines.push(`    server: ${node.server}`);
+      proxyLines.push(`    port: ${node.port}`);
+      proxyLines.push(`    cipher: ${node.cipher || 'aes-256-gcm'}`);
+      proxyLines.push(`    password: "${node.password || ''}"`);
+    } else if (nodeType === 'vless') {
+      // VLESS
+      proxyLines.push(`    type: vless`);
+      proxyLines.push(`    server: ${node.server}`);
+      proxyLines.push(`    port: ${node.port}`);
+      proxyLines.push(`    uuid: ${node.uuid}`);
+      if (node.flow) proxyLines.push(`    flow: ${node.flow}`);
+      proxyLines.push(`    network: ${node.network || 'tcp'}`);
+      if (node.security && node.security !== 'none') {
+        proxyLines.push(`    tls: true`);
+        if (node.security === 'reality') {
+          proxyLines.push(`    reality-opts:`);
+          if (node.pbk) proxyLines.push(`      public-key: ${node.pbk}`);
+          if (node.sid) proxyLines.push(`      short-id: ${node.sid}`);
+        }
+        if (node.sni) proxyLines.push(`    servername: ${node.sni}`);
+        if (node.fp) proxyLines.push(`    client-fingerprint: ${node.fp}`);
+      }
+      if (node.network === 'ws' || node.network === 'http' || node.network === 'xhttp') {
+        if (node.network === 'xhttp') {
+          proxyLines.push(`    xhttp-opts:`);
+          if (node.mode) proxyLines.push(`      mode: ${node.mode}`);
+          if (node.host) proxyLines.push(`      host: ["${node.host}"]`);
+          if (node.path) proxyLines.push(`      path: ${node.path}`);
+        } else {
+          proxyLines.push(`    ws-opts:`);
+          if (node.path) proxyLines.push(`      path: ${node.path}`);
+          if (node.host) proxyLines.push(`      headers:`);
+          if (node.host) proxyLines.push(`        Host: ${node.host}`);
+        }
+      }
+    } else if (nodeType === 'vmess') {
+      // VMess
+      proxyLines.push(`    type: vmess`);
+      proxyLines.push(`    server: ${node.server}`);
+      proxyLines.push(`    port: ${node.port}`);
+      proxyLines.push(`    uuid: ${node.uuid}`);
+      proxyLines.push(`    alterId: ${node.alterId || 0}`);
+      proxyLines.push(`    cipher: ${node.cipher || 'auto'}`);
+      if (node.network) proxyLines.push(`    network: ${node.network}`);
+      if (node.security === 'tls') {
+        proxyLines.push(`    tls: true`);
+        if (node.sni) proxyLines.push(`    servername: ${node.sni}`);
+      }
+    } else if (nodeType === 'trojan') {
+      // Trojan
+      proxyLines.push(`    type: trojan`);
+      proxyLines.push(`    server: ${node.server}`);
+      proxyLines.push(`    port: ${node.port}`);
+      proxyLines.push(`    password: "${node.password || ''}"`);
+      if (node.sni) proxyLines.push(`    sni: ${node.sni}`);
+    } else if (nodeType === 'hysteria2' || nodeType === 'hy2') {
+      // Hysteria2
+      proxyLines.push(`    type: hysteria2`);
+      proxyLines.push(`    server: ${node.server}`);
+      proxyLines.push(`    port: ${node.port}`);
+      proxyLines.push(`    password: "${node.password || ''}"`);
+      if (node.sni) proxyLines.push(`    sni: ${node.sni}`);
+      if (node.obfs) proxyLines.push(`    obfs: ${node.obfs}`);
+      if (node['obfs-password']) proxyLines.push(`    obfs-password: "${node['obfs-password']}"`);
+    } else {
+      // HTTP/HTTPS Proxy (默认)
+      proxyLines.push(`    type: http`);
+      proxyLines.push(`    server: ${node.server}`);
+      proxyLines.push(`    port: ${node.port}`);
+      proxyLines.push(`    tls: true`);
+    }
   });
 
   return [

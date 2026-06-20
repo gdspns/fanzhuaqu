@@ -57,6 +57,36 @@ export interface NodeInfo {
   server: string;
   port: number;
   flag?: string;
+  // 协议类型和完整配置
+  type?: 'http' | 'ss' | 'vless' | 'vmess' | 'trojan' | 'hysteria2' | 'hy2';
+  // Shadowsocks
+  password?: string;
+  cipher?: string;
+  // VLESS/VMess
+  uuid?: string;
+  alterId?: number;
+  encryption?: string;
+  flow?: string;
+  // 传输层
+  network?: string;
+  security?: string;
+  sni?: string;
+  alpn?: string | string[];
+  fp?: string;
+  // Reality
+  pbk?: string;
+  sid?: string;
+  // 其他传输配置
+  path?: string;
+  host?: string;
+  mode?: string;
+  // Hysteria2
+  obfs?: string;
+  'obfs-password'?: string;
+  ports?: string;
+  // 通用
+  skipCertVerify?: boolean;
+  [key: string]: any;
 }
 
 export interface Subscription {
@@ -167,14 +197,35 @@ function parseShadowsocks(url: string): ParsedProxyNode {
 function parseVless(url: string): ParsedProxyNode {
   try {
     const urlObj = new URL(url);
+    const params = new URLSearchParams(urlObj.search);
     const remark = urlObj.hash ? extractRemark(urlObj.hash.slice(1)) : '';
-    return {
+    
+    const node: ParsedProxyNode = {
       name: remark || `VLESS-${urlObj.hostname}`,
       server: urlObj.hostname,
       port: parseInt(urlObj.port) || 443,
       protocol: 'vless',
       uuid: urlObj.username,
+      encryption: params.get('encryption') || 'none',
+      flow: params.get('flow') || '',
+      security: params.get('security') || 'none',
+      sni: params.get('sni') || '',
+      fp: params.get('fp') || '',
+      alpn: params.get('alpn') || '',
+      pbk: params.get('pbk') || '',
+      sid: params.get('sid') || '',
+      network: params.get('type') || 'tcp',
+      mode: params.get('mode') || '',
+      path: params.get('path') || '',
+      host: params.get('host') || '',
     };
+    
+    // 清理空值
+    Object.keys(node).forEach(key => {
+      if (node[key] === '') delete node[key];
+    });
+    
+    return node;
   } catch {
     throw new Error('VLESS链接格式错误');
   }
@@ -185,15 +236,30 @@ function parseVmess(url: string): ParsedProxyNode {
     const base64Part = url.replace(/^vmess:\/\//, '');
     const decoded = safeBase64Decode(base64Part);
     const config = JSON.parse(decoded);
-    return {
+    
+    const node: ParsedProxyNode = {
       name: config.ps || config.name || `VMess-${config.add || config.address}`,
       server: config.add || config.address,
       port: parseInt(config.port) || 443,
       protocol: 'vmess',
       uuid: config.id,
+      alterId: parseInt(config.aid) || 0,
+      cipher: config.scy || 'auto',
+      network: config.net || config.type || 'tcp',
+      security: config.tls || config.security || '',
+      sni: config.sni || config.host || '',
+      host: config.host || '',
+      path: config.path || '',
     };
-  } catch {
-    throw new Error('VMess链接解析失败');
+    
+    // 清理空值
+    Object.keys(node).forEach(key => {
+      if (node[key] === '') delete node[key];
+    });
+    
+    return node;
+  } catch (e) {
+    throw new Error('VMess链接解析失败: ' + (e instanceof Error ? e.message : String(e)));
   }
 }
 
@@ -271,13 +337,59 @@ export function importProxyLinks(links: string[]): { success: number; failed: nu
     
     try {
       const parsed = parseProxyLink(trimmed);
-      // 转换为NodeInfo格式（简化版，仅保留基本信息）
+      
+      // 转换为NodeInfo格式，保留完整的协议配置
       const node: NodeInfo = {
         name: parsed.name,
         server: parsed.server,
         port: parsed.port,
         flag: undefined,
       };
+      
+      // 根据协议类型，保存完整配置
+      if (parsed.protocol === 'ss') {
+        node.type = 'ss';
+        node.password = parsed.password;
+        node.cipher = parsed.method;
+      } else if (parsed.protocol === 'vless') {
+        node.type = 'vless';
+        node.uuid = parsed.uuid;
+        node.encryption = parsed.encryption;
+        node.flow = parsed.flow;
+        node.network = parsed.network;
+        node.security = parsed.security;
+        node.sni = parsed.sni;
+        node.fp = parsed.fp;
+        node.alpn = parsed.alpn;
+        node.pbk = parsed.pbk;
+        node.sid = parsed.sid;
+        node.mode = parsed.mode;
+        node.path = parsed.path;
+        node.host = parsed.host;
+      } else if (parsed.protocol === 'vmess') {
+        node.type = 'vmess';
+        node.uuid = parsed.uuid;
+        node.alterId = parsed.alterId;
+        node.cipher = parsed.cipher;
+        node.network = parsed.network;
+        node.security = parsed.security;
+        node.sni = parsed.sni;
+        node.host = parsed.host;
+        node.path = parsed.path;
+      } else if (parsed.protocol === 'trojan') {
+        node.type = 'trojan';
+        node.password = parsed.password;
+        node.sni = parsed.sni;
+        node.network = parsed.network;
+        node.security = parsed.security;
+      } else if (parsed.protocol === 'hysteria2') {
+        node.type = 'hysteria2';
+        node.password = parsed.password;
+        node.sni = parsed.sni;
+        node.obfs = parsed.obfs;
+        node['obfs-password'] = parsed['obfs-password'];
+        node.ports = parsed.ports;
+      }
       
       const result = addCustomNode(node);
       if (result.ok) {
