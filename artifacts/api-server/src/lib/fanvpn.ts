@@ -112,6 +112,189 @@ export function deleteCustomNode(name: string): boolean {
   return true;
 }
 
+// ===== 代理链接解析 =====
+interface ParsedProxyNode {
+  name: string;
+  server: string;
+  port: number;
+  protocol: string;
+  [key: string]: any;
+}
+
+function safeBase64Decode(str: string): string {
+  try {
+    let normalized = str.replace(/-/g, '+').replace(/_/g, '/');
+    while (normalized.length % 4) normalized += '=';
+    return Buffer.from(normalized, 'base64').toString('utf-8');
+  } catch {
+    throw new Error('Base64解码失败');
+  }
+}
+
+function extractRemark(hash: string): string {
+  try {
+    return decodeURIComponent(hash);
+  } catch {
+    return hash;
+  }
+}
+
+function parseShadowsocks(url: string): ParsedProxyNode {
+  const match = url.match(/^ss:\/\/([^#@]+)(?:@([^#]+))?(?:#(.+))?$/);
+  if (!match) throw new Error('无效的SS链接格式');
+  
+  const remark = match[3] ? extractRemark(match[3]) : '';
+  
+  try {
+    if (match[2]) {
+      // 新格式: ss://base64@server:port#remark
+      const decoded = safeBase64Decode(match[1]);
+      const [method, password] = decoded.split(':');
+      const [server, port] = match[2].split(':');
+      return { name: remark || `SS-${server}`, server, port: parseInt(port) || 443, protocol: 'ss', method, password };
+    } else {
+      // 旧格式: ss://base64(method:password@server:port)#remark
+      const decoded = safeBase64Decode(match[1]);
+      const m = decoded.match(/^(.+?):(.+?)@(.+?):(\d+)$/);
+      if (!m) throw new Error('无法解析SS配置');
+      return { name: remark || `SS-${m[3]}`, server: m[3], port: parseInt(m[4]), protocol: 'ss', method: m[1], password: m[2] };
+    }
+  } catch (e) {
+    throw new Error('SS链接解析失败: ' + (e instanceof Error ? e.message : String(e)));
+  }
+}
+
+function parseVless(url: string): ParsedProxyNode {
+  try {
+    const urlObj = new URL(url);
+    const remark = urlObj.hash ? extractRemark(urlObj.hash.slice(1)) : '';
+    return {
+      name: remark || `VLESS-${urlObj.hostname}`,
+      server: urlObj.hostname,
+      port: parseInt(urlObj.port) || 443,
+      protocol: 'vless',
+      uuid: urlObj.username,
+    };
+  } catch {
+    throw new Error('VLESS链接格式错误');
+  }
+}
+
+function parseVmess(url: string): ParsedProxyNode {
+  try {
+    const base64Part = url.replace(/^vmess:\/\//, '');
+    const decoded = safeBase64Decode(base64Part);
+    const config = JSON.parse(decoded);
+    return {
+      name: config.ps || config.name || `VMess-${config.add || config.address}`,
+      server: config.add || config.address,
+      port: parseInt(config.port) || 443,
+      protocol: 'vmess',
+      uuid: config.id,
+    };
+  } catch {
+    throw new Error('VMess链接解析失败');
+  }
+}
+
+function parseTrojan(url: string): ParsedProxyNode {
+  try {
+    const urlObj = new URL(url);
+    const remark = urlObj.hash ? extractRemark(urlObj.hash.slice(1)) : '';
+    return {
+      name: remark || `Trojan-${urlObj.hostname}`,
+      server: urlObj.hostname,
+      port: parseInt(urlObj.port) || 443,
+      protocol: 'trojan',
+      password: urlObj.username,
+    };
+  } catch {
+    throw new Error('Trojan链接格式错误');
+  }
+}
+
+function parseAnyTLS(url: string): ParsedProxyNode {
+  try {
+    const urlObj = new URL(url);
+    const remark = urlObj.hash ? extractRemark(urlObj.hash.slice(1)) : '';
+    return {
+      name: remark || `AnyTLS-${urlObj.hostname}`,
+      server: urlObj.hostname,
+      port: parseInt(urlObj.port) || 443,
+      protocol: 'anytls',
+      uuid: urlObj.username,
+    };
+  } catch {
+    throw new Error('AnyTLS链接格式错误');
+  }
+}
+
+function parseHysteria2(url: string): ParsedProxyNode {
+  try {
+    const urlObj = new URL(url.replace(/^hy2:\/\//, 'hysteria2://'));
+    const remark = urlObj.hash ? extractRemark(urlObj.hash.slice(1)) : '';
+    return {
+      name: remark || `Hysteria2-${urlObj.hostname}`,
+      server: urlObj.hostname,
+      port: parseInt(urlObj.port) || 443,
+      protocol: 'hysteria2',
+      password: urlObj.username,
+    };
+  } catch {
+    throw new Error('Hysteria2链接格式错误');
+  }
+}
+
+export function parseProxyLink(link: string): ParsedProxyNode {
+  const trimmed = link.trim();
+  if (!trimmed) throw new Error('链接为空');
+  
+  if (trimmed.startsWith('ss://')) return parseShadowsocks(trimmed);
+  if (trimmed.startsWith('vless://')) return parseVless(trimmed);
+  if (trimmed.startsWith('vmess://')) return parseVmess(trimmed);
+  if (trimmed.startsWith('trojan://')) return parseTrojan(trimmed);
+  if (trimmed.startsWith('anytls://')) return parseAnyTLS(trimmed);
+  if (trimmed.startsWith('hysteria2://') || trimmed.startsWith('hy2://')) return parseHysteria2(trimmed);
+  
+  throw new Error(`不支持的协议: ${trimmed.split('://')[0] || '未知'}`);
+}
+
+export function importProxyLinks(links: string[]): { success: number; failed: number; errors: string[]; duplicates: string[] } {
+  let success = 0;
+  let failed = 0;
+  const errors: string[] = [];
+  const duplicates: string[] = [];
+  
+  for (const link of links) {
+    const trimmed = link.trim();
+    if (!trimmed) continue;
+    
+    try {
+      const parsed = parseProxyLink(trimmed);
+      // 转换为NodeInfo格式（简化版，仅保留基本信息）
+      const node: NodeInfo = {
+        name: parsed.name,
+        server: parsed.server,
+        port: parsed.port,
+        flag: undefined,
+      };
+      
+      const result = addCustomNode(node);
+      if (result.ok) {
+        success++;
+      } else {
+        duplicates.push(parsed.name);
+      }
+    } catch (e) {
+      failed++;
+      const errorMsg = e instanceof Error ? e.message : String(e);
+      errors.push(`${trimmed.substring(0, 30)}... - ${errorMsg}`);
+    }
+  }
+  
+  return { success, failed, errors, duplicates };
+}
+
 function generateId(): string {
   return Math.random().toString(36).substring(2, 10) + Math.random().toString(36).substring(2, 8);
 }
