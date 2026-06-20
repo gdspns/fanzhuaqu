@@ -236,15 +236,30 @@ function parseVmess(url: string): ParsedProxyNode {
     const base64Part = url.replace(/^vmess:\/\//, '');
     const decoded = safeBase64Decode(base64Part);
     const config = JSON.parse(decoded);
-    return {
+    
+    const node: ParsedProxyNode = {
       name: config.ps || config.name || `VMess-${config.add || config.address}`,
       server: config.add || config.address,
       port: parseInt(config.port) || 443,
       protocol: 'vmess',
       uuid: config.id,
+      alterId: parseInt(config.aid) || 0,
+      cipher: config.scy || 'auto',
+      network: config.net || config.type || 'tcp',
+      security: config.tls || config.security || '',
+      sni: config.sni || config.host || '',
+      host: config.host || '',
+      path: config.path || '',
     };
-  } catch {
-    throw new Error('VMess链接解析失败');
+    
+    // 清理空值
+    Object.keys(node).forEach(key => {
+      if (node[key] === '') delete node[key];
+    });
+    
+    return node;
+  } catch (e) {
+    throw new Error('VMess链接解析失败: ' + (e instanceof Error ? e.message : String(e)));
   }
 }
 
