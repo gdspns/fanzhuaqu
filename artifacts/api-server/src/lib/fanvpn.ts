@@ -293,14 +293,27 @@ function parseTrojan(url: string): ParsedProxyNode {
 function parseAnyTLS(url: string): ParsedProxyNode {
   try {
     const urlObj = new URL(url);
+    const params = new URLSearchParams(urlObj.search);
     const remark = urlObj.hash ? extractRemark(urlObj.hash.slice(1)) : '';
-    return {
+    
+    const node: ParsedProxyNode = {
       name: remark || `AnyTLS-${urlObj.hostname}`,
       server: urlObj.hostname,
       port: parseInt(urlObj.port) || 443,
       protocol: 'anytls',
       uuid: urlObj.username,
+      security: params.get('security') || 'tls',
+      sni: params.get('sni') || '',
+      network: params.get('type') || 'tcp',
+      skipCertVerify: params.get('insecure') === '1' || params.get('allowInsecure') === '1',
     };
+    
+    // 清理空值
+    Object.keys(node).forEach(key => {
+      if (node[key] === '') delete node[key];
+    });
+    
+    return node;
   } catch {
     throw new Error('AnyTLS链接格式错误');
   }
@@ -400,6 +413,14 @@ export function importProxyLinks(links: string[]): { success: number; failed: nu
         node.obfs = parsed.obfs;
         node['obfs-password'] = parsed['obfs-password'];
         node.ports = parsed.ports;
+      } else if (parsed.protocol === 'anytls') {
+        // AnyTLS 在 Clash 中作为 Trojan 处理
+        node.type = 'trojan';
+        node.password = parsed.uuid;  // AnyTLS 使用 UUID
+        node.sni = parsed.sni;
+        node.network = parsed.network || 'tcp';
+        node.security = parsed.security || 'tls';
+        node.skipCertVerify = parsed.skipCertVerify;
       }
       
       const result = addCustomNode(node);
