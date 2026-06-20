@@ -510,7 +510,10 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
             card.innerHTML = \`
               <div class="flex items-center gap-3 mb-3">
                 <div class="w-8 h-8 rounded bg-gray-800 flex items-center justify-center font-bold text-xs border border-cyan-800">\${node.flag || '🌐'}</div>
-                <div class="font-semibold text-sm truncate flex-1 text-cyan-300">\${node.name}</div>
+                <div class="font-semibold text-sm truncate flex-1 text-cyan-300 cursor-pointer hover:text-cyan-200 group" onclick="editNodeName('\${node.name.replace(/'/g, "\\\\'")}', this)" title="点击编辑节点名称">
+                  <span class="group-hover:underline">\${node.name}</span>
+                  <span class="text-gray-600 text-xs ml-1 opacity-0 group-hover:opacity-100 transition-opacity">✏️</span>
+                </div>
                 <button onclick="doDeleteCustomNode('\${node.name.replace(/'/g, "\\\\'")}') " class="text-gray-600 hover:text-rose-400 transition-colors text-lg leading-none">&times;</button>
               </div>
               <div class="text-xs text-gray-500 font-mono space-y-1">
@@ -541,6 +544,70 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
         manualTab.classList.add('hidden');
         importTab.classList.remove('hidden');
       }
+    }
+
+    // 编辑节点名称（原位编辑）
+    function editNodeName(oldName, element) {
+      const currentText = element.querySelector('span:first-child').textContent;
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.value = currentText;
+      input.className = 'bg-gray-900 border border-cyan-500 rounded px-2 py-1 text-sm text-cyan-300 focus:outline-none focus:border-cyan-400 w-full';
+      
+      const span = element.querySelector('span:first-child');
+      const originalHTML = element.innerHTML;
+      element.innerHTML = '';
+      element.appendChild(input);
+      input.focus();
+      input.select();
+      
+      function saveEdit() {
+        const newName = input.value.trim();
+        if (!newName) {
+          showToast('节点名称不能为空', true);
+          input.focus();
+          return;
+        }
+        if (newName === currentText) {
+          element.innerHTML = originalHTML;
+          return;
+        }
+        
+        fetch('/api/custom-nodes/' + encodeURIComponent(oldName), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', 'x-admin-password': sessionPwd },
+          body: JSON.stringify({ newName })
+        }).then(r => r.json()).then(d => {
+          if (d.ok) {
+            renderCustomNodes();
+            showToast('✅ 节点名称已更新');
+          } else {
+            element.innerHTML = originalHTML;
+            showToast(d.error || '修改失败', true);
+          }
+        }).catch(() => {
+          element.innerHTML = originalHTML;
+          showToast('请求失败', true);
+        });
+      }
+      
+      function cancelEdit() {
+        element.innerHTML = originalHTML;
+      }
+      
+      input.addEventListener('blur', () => {
+        setTimeout(cancelEdit, 200);
+      });
+      
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          saveEdit();
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          cancelEdit();
+        }
+      });
     }
 
     // 批量导入代理链接
