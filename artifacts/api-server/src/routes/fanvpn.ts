@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import fs from 'fs';
 import path from 'path';
-import { nodeData, createSubscription, listSubscriptions, deleteSubscriptionById, updateSubscriptionById, findSubscriptionByToken, getPrivateKey, setPrivateKey, initFromDB, saveSetting, checkAndRegisterDevice, getDeviceCountBatch, listDevices, clearDevices, listCustomNodes, addCustomNode, deleteCustomNode } from '../lib/fanvpn.js';
+import { nodeData, createSubscription, listSubscriptions, deleteSubscriptionById, updateSubscriptionById, findSubscriptionByToken, getPrivateKey, setPrivateKey, initFromDB, saveSetting, checkAndRegisterDevice, getDeviceCountBatch, listDevices, clearDevices, listCustomNodes, addCustomNode, deleteCustomNode, importProxyLinks } from '../lib/fanvpn.js';
 
 const router = Router();
 
@@ -328,12 +328,20 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
 
   <!-- 添加自定义节点弹窗 -->
   <div id="add-cn-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center hidden opacity-0 transition-opacity">
-    <div id="add-cn-modal-box" class="bg-card p-6 rounded-2xl border border-gray-700 shadow-2xl w-full max-w-md transform scale-95 transition-transform">
+    <div id="add-cn-modal-box" class="bg-card p-6 rounded-2xl border border-gray-700 shadow-2xl w-full max-w-lg transform scale-95 transition-transform">
       <div class="flex justify-between items-center mb-4">
         <h3 class="text-lg font-bold text-white">✏️ 添加自定义节点</h3>
         <button onclick="closeAddCnModal()" class="text-gray-500 hover:text-white text-xl">&times;</button>
       </div>
-      <div class="space-y-3">
+      
+      <!-- 选项卡切换 -->
+      <div class="flex gap-2 mb-4 bg-gray-900 p-1 rounded-lg">
+        <button onclick="switchNodeTab('manual')" id="node-tab-manual" class="flex-1 py-2 rounded-md text-sm font-semibold bg-gray-800 text-cyan-400 transition-colors">手动添加</button>
+        <button onclick="switchNodeTab('import')" id="node-tab-import" class="flex-1 py-2 rounded-md text-sm font-semibold text-gray-400 hover:text-white transition-colors">导入链接</button>
+      </div>
+      
+      <!-- 手动添加节点 -->
+      <div id="node-manual-tab" class="space-y-3">
         <div>
           <label class="block text-sm text-gray-400 mb-1">节点名称</label>
           <input type="text" id="cn-name" placeholder="例: 🇺🇸 美国节点01" class="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-cyan-400 focus:outline-none focus:border-cyan-500">
@@ -356,6 +364,20 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
         <div class="flex gap-3 pt-1">
           <button onclick="closeAddCnModal()" class="flex-1 py-2.5 rounded-lg border border-gray-700 text-gray-400 hover:bg-gray-800 transition-colors">取消</button>
           <button onclick="doAddCustomNode()" class="flex-1 py-2.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-gray-900 font-bold transition-colors">添加</button>
+        </div>
+      </div>
+      
+      <!-- 导入链接 -->
+      <div id="node-import-tab" class="space-y-3 hidden">
+        <div>
+          <label class="block text-sm text-gray-400 mb-1">代理链接 <span class="text-gray-600">(每行一个)</span></label>
+          <textarea id="import-links" rows="8" placeholder="粘贴代理链接，支持：&#10;ss://...&#10;vless://...&#10;vmess://...&#10;trojan://...&#10;hysteria2://...&#10;anytls://..." class="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-cyan-400 focus:outline-none focus:border-cyan-500 text-xs font-mono resize-none" spellcheck="false"></textarea>
+        </div>
+        <p class="text-xs text-emerald-400/70">✅ 支持 SS、VLESS、VMess、Trojan、Hysteria2、AnyTLS 等协议</p>
+        <p class="text-xs text-gray-600">导入后自动解析节点名称、服务器地址和端口，重复节点会被跳过。</p>
+        <div class="flex gap-3 pt-1">
+          <button onclick="closeAddCnModal()" class="flex-1 py-2.5 rounded-lg border border-gray-700 text-gray-400 hover:bg-gray-800 transition-colors">取消</button>
+          <button onclick="doImportLinks()" class="flex-1 py-2.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-gray-900 font-bold transition-colors">批量导入</button>
         </div>
       </div>
     </div>
@@ -499,6 +521,70 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
             list.appendChild(card);
           });
         });
+    }
+
+    // 切换添加节点的选项卡（手动添加/导入链接）
+    function switchNodeTab(tab) {
+      const manualBtn = document.getElementById('node-tab-manual');
+      const importBtn = document.getElementById('node-tab-import');
+      const manualTab = document.getElementById('node-manual-tab');
+      const importTab = document.getElementById('node-import-tab');
+      
+      if (tab === 'manual') {
+        manualBtn.className = 'flex-1 py-2 rounded-md text-sm font-semibold bg-gray-800 text-cyan-400 transition-colors';
+        importBtn.className = 'flex-1 py-2 rounded-md text-sm font-semibold text-gray-400 hover:text-white transition-colors';
+        manualTab.classList.remove('hidden');
+        importTab.classList.add('hidden');
+      } else {
+        manualBtn.className = 'flex-1 py-2 rounded-md text-sm font-semibold text-gray-400 hover:text-white transition-colors';
+        importBtn.className = 'flex-1 py-2 rounded-md text-sm font-semibold bg-gray-800 text-cyan-400 transition-colors';
+        manualTab.classList.add('hidden');
+        importTab.classList.remove('hidden');
+      }
+    }
+
+    // 批量导入代理链接
+    function doImportLinks() {
+      const text = document.getElementById('import-links').value;
+      const lines = text.split('\\n').map(l => l.trim()).filter(l => l.length > 0);
+      
+      if (lines.length === 0) {
+        showToast('请粘贴至少一个代理链接', true);
+        return;
+      }
+      
+      fetch('/api/custom-nodes/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-admin-password': sessionPwd },
+        body: JSON.stringify({ links: lines })
+      }).then(r => r.json()).then(result => {
+        let msg = '';
+        if (result.success > 0) {
+          msg += \`成功导入 \${result.success} 个节点\`;
+        }
+        if (result.duplicates && result.duplicates.length > 0) {
+          msg += \`，\${result.duplicates.length} 个重复已跳过\`;
+        }
+        if (result.failed > 0) {
+          msg += \`，\${result.failed} 个解析失败\`;
+        }
+        
+        if (result.success > 0) {
+          document.getElementById('import-links').value = '';
+          closeAddCnModal();
+          renderCustomNodes();
+          showToast(msg || '导入完成');
+          
+          // 如果有错误，额外显示详情
+          if (result.errors && result.errors.length > 0 && result.errors.length <= 3) {
+            setTimeout(() => {
+              showToast('失败: ' + result.errors.join('; '), true);
+            }, 3500);
+          }
+        } else {
+          showToast(result.errors && result.errors.length > 0 ? result.errors[0] : '导入失败', true);
+        }
+      }).catch(() => showToast('请求失败', true));
     }
 
     function logout() {
@@ -979,6 +1065,18 @@ router.delete('/custom-nodes/:name', (req, res) => {
   const ok = deleteCustomNode(decodeURIComponent(req.params.name));
   if (!ok) return res.status(404).json({ error: '节点不存在' });
   res.json({ ok: true });
+});
+
+// ===== API: 批量导入代理链接 =====
+router.post('/custom-nodes/import', (req, res) => {
+  const pwd = req.headers['x-admin-password'] as string | undefined;
+  if (pwd !== adminPassword) return res.status(401).json({ error: '未授权' });
+  const { links } = req.body as { links?: string[] };
+  if (!links || !Array.isArray(links)) {
+    return res.status(400).json({ error: '参数错误：需要 links 数组' });
+  }
+  const result = importProxyLinks(links);
+  res.json(result);
 });
 
 // ===== API: 清除节点变化标记 =====
