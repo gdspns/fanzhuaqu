@@ -1378,28 +1378,42 @@ function buildClashYaml(): string {
       proxyLines.push(`    uuid: ${node.uuid}`);
       if (node.flow) proxyLines.push(`    flow: ${node.flow}`);
       proxyLines.push(`    network: ${node.network || 'tcp'}`);
+      
+      // TLS/Reality 配置
       if (node.security && node.security !== 'none') {
-        proxyLines.push(`    tls: true`);
         if (node.security === 'reality') {
+          // Reality 配置
+          proxyLines.push(`    tls: true`);
           proxyLines.push(`    reality-opts:`);
           if (node.pbk) proxyLines.push(`      public-key: ${node.pbk}`);
           if (node.sid) proxyLines.push(`      short-id: ${node.sid}`);
-        }
-        if (node.sni) proxyLines.push(`    servername: ${node.sni}`);
-        if (node.fp) proxyLines.push(`    client-fingerprint: ${node.fp}`);
-      }
-      if (node.network === 'ws' || node.network === 'http' || node.network === 'xhttp') {
-        if (node.network === 'xhttp') {
-          proxyLines.push(`    xhttp-opts:`);
-          if (node.mode) proxyLines.push(`      mode: ${node.mode}`);
-          if (node.host) proxyLines.push(`      host: ["${node.host}"]`);
-          if (node.path) proxyLines.push(`      path: ${node.path}`);
+          if (node.sni) proxyLines.push(`    servername: ${node.sni}`);
+          if (node.fp) proxyLines.push(`    client-fingerprint: ${node.fp}`);
         } else {
-          proxyLines.push(`    ws-opts:`);
-          if (node.path) proxyLines.push(`      path: ${node.path}`);
-          if (node.host) proxyLines.push(`      headers:`);
-          if (node.host) proxyLines.push(`        Host: ${node.host}`);
+          // 普通 TLS
+          proxyLines.push(`    tls: true`);
+          if (node.sni) proxyLines.push(`    servername: ${node.sni}`);
+          if (node.fp) proxyLines.push(`    client-fingerprint: ${node.fp}`);
+          proxyLines.push(`    skip-cert-verify: false`);
         }
+      }
+      
+      // 传输层配置
+      if (node.network === 'ws') {
+        proxyLines.push(`    ws-opts:`);
+        if (node.path) proxyLines.push(`      path: ${node.path}`);
+        if (node.host) {
+          proxyLines.push(`      headers:`);
+          proxyLines.push(`        Host: ${node.host}`);
+        }
+      } else if (node.network === 'xhttp') {
+        proxyLines.push(`    xhttp-opts:`);
+        if (node.mode) proxyLines.push(`      mode: ${node.mode}`);
+        if (node.host) proxyLines.push(`      host: ${node.host}`);
+        if (node.path) proxyLines.push(`      path: ${node.path}`);
+      } else if (node.network === 'grpc') {
+        proxyLines.push(`    grpc-opts:`);
+        if (node.path) proxyLines.push(`      grpc-service-name: ${node.path}`);
       }
     } else if (nodeType === 'vmess') {
       // VMess
