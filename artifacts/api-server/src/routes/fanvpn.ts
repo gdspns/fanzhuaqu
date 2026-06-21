@@ -771,6 +771,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
               <td class="p-4">\${deviceBadge}</td>
               <td class="p-4 text-right space-x-2">
                 <button onclick="copySubUrl('\${sub.token}', 'clash')" class="text-xs bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 px-3 py-1.5 rounded transition-colors \${isExpired ? 'opacity-50 cursor-not-allowed' : ''}" \${isExpired ? 'disabled' : ''}>复制 Clash</button>
+                <button onclick="copySubUrl('\${sub.token}', 'base64')" class="text-xs bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 px-3 py-1.5 rounded transition-colors \${isExpired ? 'opacity-50 cursor-not-allowed' : ''}" \${isExpired ? 'disabled' : ''}>复制 v2rayN</button>
                 <button onclick="viewDevices('\${sub.id}', '\${sub.token}')" class="text-xs bg-violet-500/10 hover:bg-violet-500/20 text-violet-400 px-3 py-1.5 rounded transition-colors">设备</button>
                 <button onclick="openEditModal('\${sub.id}', '\${sub.name.replace(/'/g, '&#39;')}', \${sub.expireAt}, \${sub.maxDevices})" class="text-xs bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 px-3 py-1.5 rounded transition-colors">编辑</button>
                 <button onclick="deleteSub('\${sub.id}')" class="text-xs bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 px-3 py-1.5 rounded transition-colors">删除</button>
@@ -836,12 +837,12 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     function copySubUrl(token, type) {
       const url = window.location.origin + '/api/sub/' + type + '/' + token;
       navigator.clipboard.writeText(url).then(() => {
-        showToast('复制成功！可直接粘贴至 Clash');
+        showToast(type === 'base64' ? '复制成功！可直接粘贴至 v2rayN' : '复制成功！可直接粘贴至 Clash');
       }).catch(() => {
         const tmp = document.createElement('input');
         tmp.value = url; document.body.appendChild(tmp); tmp.select();
         document.execCommand('copy'); document.body.removeChild(tmp);
-        showToast('复制成功！可直接粘贴至 Clash');
+        showToast(type === 'base64' ? '复制成功！可直接粘贴至 v2rayN' : '复制成功！可直接粘贴至 Clash');
       });
     }
 
@@ -1508,10 +1509,93 @@ function buildClashYaml(): string {
   ].join('\n');
 }
 
+function trimBase64Padding(value: string): string {
+  return value.replace(/=+$/g, '');
+}
+
+function appendParam(params: URLSearchParams, key: string, value: unknown): void {
+  if (value === undefined || value === null || value === '') return;
+  params.set(key, Array.isArray(value) ? value.join(',') : String(value));
+}
+
+function buildVlessUri(node: (typeof nodeData.nodes)[number]): string | null {
+  if (!node.uuid) return null;
+  const params = new URLSearchParams();
+  appendParam(params, 'encryption', node.encryption || 'none');
+  appendParam(params, 'type', node.network || 'tcp');
+  appendParam(params, 'security', node.security || 'none');
+  appendParam(params, 'flow', node.flow);
+  appendParam(params, 'sni', node.sni);
+  appendParam(params, 'fp', node.fp);
+  appendParam(params, 'alpn', node.alpn);
+  appendParam(params, 'pbk', node.pbk);
+  appendParam(params, 'sid', node.sid);
+  appendParam(params, 'path', node.path);
+  appendParam(params, 'host', node.host);
+  appendParam(params, 'mode', node.mode);
+  return `vless://${encodeURIComponent(node.uuid)}@${node.server}:${node.port}?${params.toString()}#${encodeURIComponent(node.name)}`;
+}
+
+function buildShadowsocksUri(node: (typeof nodeData.nodes)[number]): string | null {
+  if (!node.password) return null;
+  const cipher = node.cipher || 'aes-256-gcm';
+  const userInfo = trimBase64Padding(Buffer.from(`${cipher}:${node.password}`, 'utf8').toString('base64'));
+  return `ss://${userInfo}@${node.server}:${node.port}#${encodeURIComponent(node.name)}`;
+}
+
+function buildVmessUri(node: (typeof nodeData.nodes)[number]): string | null {
+  if (!node.uuid) return null;
+  const config = {
+    v: '2',
+    ps: node.name,
+    add: node.server,
+    port: String(node.port),
+    id: node.uuid,
+    aid: String(node.alterId || 0),
+    scy: node.cipher || 'auto',
+    net: node.network || 'tcp',
+    type: 'none',
+    host: node.host || '',
+    path: node.path || '',
+    tls: node.security === 'tls' ? 'tls' : '',
+    sni: node.sni || '',
+  };
+  return `vmess://${Buffer.from(JSON.stringify(config), 'utf8').toString('base64')}`;
+}
+
+function buildTrojanUri(node: (typeof nodeData.nodes)[number]): string | null {
+  if (!node.password) return null;
+  const params = new URLSearchParams();
+  appendParam(params, 'security', node.security || 'tls');
+  appendParam(params, 'sni', node.sni);
+  appendParam(params, 'type', node.network || 'tcp');
+  const query = params.toString();
+  return `trojan://${encodeURIComponent(node.password)}@${node.server}:${node.port}${query ? `?${query}` : ''}#${encodeURIComponent(node.name)}`;
+}
+
+function buildHysteria2Uri(node: (typeof nodeData.nodes)[number]): string | null {
+  if (!node.password) return null;
+  const params = new URLSearchParams();
+  appendParam(params, 'sni', node.sni);
+  appendParam(params, 'obfs', node.obfs);
+  appendParam(params, 'obfs-password', node['obfs-password']);
+  const query = params.toString();
+  return `hysteria2://${encodeURIComponent(node.password)}@${node.server}:${node.port}${query ? `?${query}` : ''}#${encodeURIComponent(node.name)}`;
+}
+
+function buildV2rayNUri(node: (typeof nodeData.nodes)[number]): string | null {
+  if (node.type === 'vless') return buildVlessUri(node);
+  if (node.type === 'ss') return buildShadowsocksUri(node);
+  if (node.type === 'vmess') return buildVmessUri(node);
+  if (node.type === 'trojan') return buildTrojanUri(node);
+  if (node.type === 'hysteria2' || node.type === 'hy2') return buildHysteria2Uri(node);
+  return null;
+}
+
 function buildBase64(): string {
   const allNodes = [...nodeData.nodes, ...listCustomNodes()];
-  const lines = allNodes.map(n => `https://${n.server}:${n.port}#${encodeURIComponent(n.name)}`).join('\n');
-  return Buffer.from(lines).toString('base64');
+  const lines = allNodes.map(buildV2rayNUri).filter((line): line is string => Boolean(line));
+  return Buffer.from(lines.join('\n'), 'utf8').toString('base64');
 }
 
 const EXPIRED_NODE_NAME = '❌ 您的服务已到期，请联系管理员续费';
