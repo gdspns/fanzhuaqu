@@ -833,23 +833,18 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
         .catch(() => showToast('删除失败', true));
     }
 
-    function getSubscriptionTitleFileName(type) {
-      const title = (document.getElementById('site-title-text')?.textContent || 'fanvpn').trim();
-      const safeTitle = title.replace(/[\\/:*?"<>|\r\n]+/g, '_').replace(/\s+/g, ' ').slice(0, 80).trim() || 'fanvpn';
-      return encodeURIComponent(safeTitle + (type === 'base64' ? '.txt' : '.yaml'));
-    }
-
     function copySubUrl(token, type) {
-      const url = window.location.origin + '/api/sub/' + type + '/' + token + '/' + getSubscriptionTitleFileName(type);
+      const url = window.location.origin + '/api/sub/' + type + '/' + token;
       navigator.clipboard.writeText(url).then(() => {
-        showToast('复制成功！可直接粘贴至 Clash/Karing');
+        showToast('复制成功！可直接粘贴至 Clash');
       }).catch(() => {
         const tmp = document.createElement('input');
         tmp.value = url; document.body.appendChild(tmp); tmp.select();
         document.execCommand('copy'); document.body.removeChild(tmp);
-        showToast('复制成功！可直接粘贴至 Clash/Karing');
+        showToast('复制成功！可直接粘贴至 Clash');
       });
     }
+
     function showToast(msg, isError = false) {
       const toast = document.getElementById('toast');
       toast.innerText = msg;
@@ -1269,70 +1264,60 @@ router.get('/sub/clash', (req, res) => {
   res.send(buildClashYaml());
 });
 
-router.get('/sub/clash/:token/:fileName', handleTokenClashSubscription);
-router.get('/sub/clash/:token', handleTokenClashSubscription);
-
-async function handleTokenClashSubscription(req: import('express').Request, res: import('express').Response): Promise<void> {
-  const token = Array.isArray(req.params.token) ? req.params.token[0] : req.params.token;
-  const sub = findSubscriptionByToken(token);
-  if (!sub) { res.status(404).send('订阅不存在'); return; }
+router.get('/sub/clash/:token', async (req, res) => {
+  const sub = findSubscriptionByToken(req.params.token);
+  if (!sub) return res.status(404).send('订阅不存在');
 
   res.setHeader('Content-Type', 'text/yaml; charset=utf-8');
   setSubscriptionTitleHeaders(res, 'yaml');
 
   if (Date.now() > sub.expireAt) {
     res.setHeader('Subscription-Userinfo', `upload=0; download=0; total=0; expire=1`);
-    res.send(buildExpiredClashYaml());
-    return;
+    return res.send(buildExpiredClashYaml());
   }
 
-  if (nodeData.nodes.length === 0) { res.status(503).send('节点未准备好，请稍后再试'); return; }
+  if (nodeData.nodes.length === 0) return res.status(503).send('节点未准备好，请稍后再试');
 
   if (sub.maxDevices > 0) {
     const ip = getClientIp(req);
     const { allowed } = await checkAndRegisterDevice(sub.token, ip, sub.maxDevices);
-    if (!allowed) { res.status(403).send(`设备数已达上限 (${sub.maxDevices})，如需更换设备请联系管理员`); return; }
+    if (!allowed) return res.status(403).send(`设备数已达上限 (${sub.maxDevices})，如需更换设备请联系管理员`);
   }
 
   const expireSeconds = Math.floor(sub.expireAt / 1000);
   res.setHeader('Subscription-Userinfo', `upload=0; download=0; total=109951162777600; expire=${expireSeconds}`);
   res.send(buildClashYaml());
-}
+});
 
 // ===== 订阅接口: Base64 =====
 router.get('/sub/base64', (req, res) => {
-  if (nodeData.nodes.length === 0) { res.status(503).send('节点未准备好'); return; }
+  if (nodeData.nodes.length === 0) return res.status(503).send('节点未准备好');
   res.setHeader('Content-Type', 'text/plain; charset=utf-8');
   setSubscriptionTitleHeaders(res, 'txt');
   res.send(buildBase64());
 });
 
-router.get('/sub/base64/:token/:fileName', handleTokenBase64Subscription);
-router.get('/sub/base64/:token', handleTokenBase64Subscription);
-
-async function handleTokenBase64Subscription(req: import('express').Request, res: import('express').Response): Promise<void> {
-  const token = Array.isArray(req.params.token) ? req.params.token[0] : req.params.token;
-  const sub = findSubscriptionByToken(token);
-  if (!sub) { res.status(404).send('订阅不存在'); return; }
+router.get('/sub/base64/:token', async (req, res) => {
+  const sub = findSubscriptionByToken(req.params.token);
+  if (!sub) return res.status(404).send('订阅不存在');
 
   res.setHeader('Content-Type', 'text/plain; charset=utf-8');
   setSubscriptionTitleHeaders(res, 'txt');
 
   if (Date.now() > sub.expireAt) {
-    res.send(buildExpiredBase64());
-    return;
+    return res.send(buildExpiredBase64());
   }
 
-  if (nodeData.nodes.length === 0) { res.status(503).send('节点未准备好'); return; }
+  if (nodeData.nodes.length === 0) return res.status(503).send('节点未准备好');
 
   if (sub.maxDevices > 0) {
     const ip = getClientIp(req);
     const { allowed } = await checkAndRegisterDevice(sub.token, ip, sub.maxDevices);
-    if (!allowed) { res.status(403).send(`设备数已达上限 (${sub.maxDevices})，如需更换设备请联系管理员`); return; }
+    if (!allowed) return res.status(403).send(`设备数已达上限 (${sub.maxDevices})，如需更换设备请联系管理员`);
   }
 
   res.send(buildBase64());
-}
+});
 
 // ===== 面板 =====
 router.get('/my-fan-admin-8392', (_req, res) => {
@@ -1387,7 +1372,6 @@ function setSubscriptionTitleHeaders(res: import('express').Response, extension:
   const fileName = `${sanitizeDownloadFileName(title)}.${extension}`;
 
   res.setHeader('profile-title', `base64:${Buffer.from(title, 'utf8').toString('base64')}`);
-  res.setHeader('subscription-title', encodeURIComponent(title));
   res.setHeader('Content-Disposition', `attachment; filename="subscription.${extension}"; filename*=UTF-8''${encodeURIComponent(fileName)}`);
 }
 
