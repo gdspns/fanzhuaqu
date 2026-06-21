@@ -1259,7 +1259,7 @@ router.get('/sub/clash', (req, res) => {
     return res.status(503).send('节点未准备好，请稍后再试');
   }
   res.setHeader('Content-Type', 'text/yaml; charset=utf-8');
-  res.setHeader('Content-Disposition', 'attachment; filename="fanvpn_clash.yaml"');
+  setSubscriptionTitleHeaders(res, 'yaml');
   res.setHeader('Subscription-Userinfo', `upload=0; download=0; total=109951162777600; expire=4102444800`);
   res.send(buildClashYaml());
 });
@@ -1269,7 +1269,7 @@ router.get('/sub/clash/:token', async (req, res) => {
   if (!sub) return res.status(404).send('订阅不存在');
 
   res.setHeader('Content-Type', 'text/yaml; charset=utf-8');
-  res.setHeader('Content-Disposition', 'attachment; filename="fanvpn_clash.yaml"');
+  setSubscriptionTitleHeaders(res, 'yaml');
 
   if (Date.now() > sub.expireAt) {
     res.setHeader('Subscription-Userinfo', `upload=0; download=0; total=0; expire=1`);
@@ -1293,6 +1293,7 @@ router.get('/sub/clash/:token', async (req, res) => {
 router.get('/sub/base64', (req, res) => {
   if (nodeData.nodes.length === 0) return res.status(503).send('节点未准备好');
   res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  setSubscriptionTitleHeaders(res, 'txt');
   res.send(buildBase64());
 });
 
@@ -1301,6 +1302,7 @@ router.get('/sub/base64/:token', async (req, res) => {
   if (!sub) return res.status(404).send('订阅不存在');
 
   res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  setSubscriptionTitleHeaders(res, 'txt');
 
   if (Date.now() > sub.expireAt) {
     return res.send(buildExpiredBase64());
@@ -1356,6 +1358,23 @@ router.delete('/subs/:id/devices', requireAdmin, async (req, res) => {
 });
 
 // ===== 工具函数 =====
+function sanitizeDownloadFileName(title: string): string {
+  const safeTitle = title.trim()
+    .replace(/[\\/:*?"<>|\r\n]+/g, '_')
+    .replace(/\s+/g, ' ')
+    .slice(0, 80)
+    .trim();
+  return safeTitle || 'fanvpn';
+}
+
+function setSubscriptionTitleHeaders(res: import('express').Response, extension: 'yaml' | 'txt'): void {
+  const title = siteTitle.trim() || DEFAULT_TITLE;
+  const fileName = `${sanitizeDownloadFileName(title)}.${extension}`;
+
+  res.setHeader('profile-title', `base64:${Buffer.from(title, 'utf8').toString('base64')}`);
+  res.setHeader('Content-Disposition', `attachment; filename="subscription.${extension}"; filename*=UTF-8''${encodeURIComponent(fileName)}`);
+}
+
 function buildClashYaml(): string {
   const proxyNames: string[] = [];
   const proxyLines: string[] = [];
