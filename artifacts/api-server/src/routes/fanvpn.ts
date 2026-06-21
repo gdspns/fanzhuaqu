@@ -1636,8 +1636,10 @@ function buildExpiredClashYaml(): string {
 }
 
 function buildExpiredBase64(): string {
-  const line = `https://${EXPIRED_SERVER}:${EXPIRED_PORT}#${encodeURIComponent(EXPIRED_NODE_NAME)}`;
-  return Buffer.from(line).toString('base64');
+  const expiredUuid = '00000000-0000-0000-0000-000000000000';
+  const params = new URLSearchParams({ encryption: 'none', security: 'none', type: 'tcp' });
+  const line = `vless://${expiredUuid}@${EXPIRED_SERVER}:${EXPIRED_PORT}?${params.toString()}#${encodeURIComponent(EXPIRED_NODE_NAME)}`;
+  return Buffer.from(line, 'utf8').toString('base64');
 }
 
 export default router;
