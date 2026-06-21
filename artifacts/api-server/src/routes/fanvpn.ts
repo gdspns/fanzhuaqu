@@ -835,7 +835,11 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
 
     function getSubscriptionTitleFileName(type) {
       const title = (document.getElementById('site-title-text')?.textContent || 'fanvpn').trim();
-      const safeTitle = title.replace(/[\\/:*?"<>|\r\n]+/g, '_').replace(/\s+/g, ' ').slice(0, 80).trim() || 'fanvpn';
+      const invalidChars = '/:*?"<>|';
+      const normalizedTitle = Array.from(title)
+        .map(ch => invalidChars.includes(ch) || ch === String.fromCharCode(92) || ch.charCodeAt(0) < 32 ? '_' : ch)
+        .join('');
+      const safeTitle = normalizedTitle.replace(/\s+/g, ' ').slice(0, 80).trim() || 'fanvpn';
       return encodeURIComponent(safeTitle + (type === 'base64' ? '.txt' : '.yaml'));
     }
 
